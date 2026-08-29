@@ -1,0 +1,28 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e4]:
+        - button "메뉴" [ref=e5] [cursor=pointer]:
+          - generic [ref=e6]: menu
+        - generic [ref=e7]: 강서나눔케어
+      - button "상담연결" [ref=e9] [cursor=pointer]
+    - main [ref=e10]:
+      - paragraph [ref=e12]: 강서나눔돌봄센터 AI 챗봇 및 민원 접수 센터
+      - generic [ref=e14]:
+        - generic [ref=e15]: 안녕하세요. 강서나눔돌봄센터 AI 상담원입니다. 돌봄 서비스 요금, 신청 절차, 센터 이용 등 무엇이든 편하게 물어보세요.
+        - generic [ref=e16]:
+          - generic [ref=e17]: "답변 평가:"
+          - button "도움됨" [ref=e18] [cursor=pointer]:
+            - generic [ref=e19]: thumb_up
+          - button "도움 안 됨 (담당자 연결)" [ref=e20] [cursor=pointer]:
+            - generic [ref=e21]: thumb_down
+    - button "person_raised_hand 담당자에게 메시지 남기기" [ref=e24] [cursor=pointer]:
+      - generic [ref=e25]: person_raised_hand
+      - generic [ref=e26]: 담당자에게 메시지 남기기
+    - generic [ref=e28]:
+      - button "음성 입력 시작" [ref=e29] [cursor=pointer]:
+        - generic [ref=e30]: mic
+      - generic [ref=e31]:
+        - textbox "메시지를 입력하세요..." [ref=e32]
+        - button "전송" [disabled] [ref=e33]
+  - alert [ref=e34]

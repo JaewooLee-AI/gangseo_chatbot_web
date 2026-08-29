@@ -1,0 +1,52 @@
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css");
+@import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-canvas-ivory: #FFF8F0;
+  --color-deep-umber: #3A2E24;
+  --color-warm-brick: #D9534F;
+  --color-ui-sand: #EFE6DD;
+  --color-ui-stone: #D1C7BD;
+}
+
+body {
+  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+  background-color: #FFF8F0;
+  color: #3A2E24;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Stitch Ace Hotel Custom Utilities */
+.ghost-border {
+  border: 1px solid rgba(58, 46, 36, 0.15);
+}
+
+.ambient-shadow {
+  box-shadow: 0 4px 12px rgba(58, 46, 36, 0.04);
+}
+
+.chat-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.chat-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-scroll::-webkit-scrollbar-thumb {
+  background-color: #D1C7BD;
+  border-radius: 4px;
+}
+
+/* Hide scrollbar */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
