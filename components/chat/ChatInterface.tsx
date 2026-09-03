@@ -23,6 +23,9 @@ export default function ChatInterface() {
   // 진입 시 선택하는 문의 유형. 선택하면 해당 분야 문서 안에서만 검색해
   // 다른 분야(예: 이용자 문의에 직원용 문서) 자료가 섞이는 것을 막는다.
   const [persona, setPersona] = useState<string | null>(null);
+  // 선택 카드의 표시 여부는 대화 진행 상황과 무관하게 별도로 관리한다.
+  // (messages.length에 묶으면 대화 시작 후 '변경'을 눌렀을 때 카드가 다시 열리지 않는다.)
+  const [isPickerOpen, setIsPickerOpen] = useState(true);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -77,6 +80,8 @@ export default function ChatInterface() {
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setTranscript("");
+    // 유형을 고르지 않고 바로 질문한 경우에도 선택 카드는 접는다(대화 화면을 가리지 않도록).
+    setIsPickerOpen(false);
     if (isListening) stopListening();
     setIsLoading(true);
 
@@ -191,8 +196,8 @@ export default function ChatInterface() {
             />
           ))}
 
-          {/* 진입 유형 선택 — 아직 고르지 않았고 대화 시작 전일 때만 노출 */}
-          {!persona && messages.length === 1 && (
+          {/* 진입 유형 선택 카드 */}
+          {isPickerOpen && (
             <div className="bg-ui-sand rounded-xl p-5 ambient-shadow ghost-border">
               <p className="font-body-md text-body-md text-deep-umber mb-4">
                 어떤 도움이 필요하신가요? 아래에서 골라 주시면 더 정확하게 안내해 드릴 수 있습니다.
@@ -204,24 +209,40 @@ export default function ChatInterface() {
                 {Object.entries(PERSONA_LABELS).map(([key, label]) => (
                   <button
                     key={key}
-                    onClick={() => setPersona(key)}
-                    className="text-left px-4 py-3 rounded-xl border border-deep-umber/30 bg-canvas-ivory text-deep-umber hover:bg-deep-umber hover:text-canvas-ivory transition-colors font-label-lg text-label-lg"
+                    onClick={() => {
+                      setPersona(key);
+                      setIsPickerOpen(false);
+                    }}
+                    className={`text-left px-4 py-3 rounded-xl border transition-colors font-label-lg text-label-lg ${
+                      persona === key
+                        ? "border-deep-umber bg-deep-umber text-canvas-ivory"
+                        : "border-deep-umber/30 bg-canvas-ivory text-deep-umber hover:bg-deep-umber hover:text-canvas-ivory"
+                    }`}
                   >
                     {label}
                   </button>
                 ))}
               </div>
+              {/* 이미 선택한 유형이 있으면 변경을 취소하고 원래대로 돌아갈 수 있게 한다 */}
+              {persona && (
+                <button
+                  onClick={() => setIsPickerOpen(false)}
+                  className="mt-3 font-label-md text-label-md text-outline underline hover:text-deep-umber transition-colors"
+                >
+                  취소
+                </button>
+              )}
             </div>
           )}
 
           {/* 선택한 유형 표시 및 변경 */}
-          {persona && (
+          {persona && !isPickerOpen && (
             <div className="flex items-center gap-2 self-start">
               <span className="px-3 py-1.5 rounded-full bg-ui-sand text-deep-umber ghost-border font-label-md text-label-md">
                 {PERSONA_LABELS[persona]}
               </span>
               <button
-                onClick={() => setPersona(null)}
+                onClick={() => setIsPickerOpen(true)}
                 className="font-label-md text-label-md text-outline underline hover:text-deep-umber transition-colors"
               >
                 변경
