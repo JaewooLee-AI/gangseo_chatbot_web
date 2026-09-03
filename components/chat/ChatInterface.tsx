@@ -5,6 +5,7 @@ import ChatMessage, { MessageProps } from "./ChatMessage";
 import STTButton from "./STTButton";
 import HandoverModal from "../ticket/HandoverModal";
 import { useSpeechToText } from "@/hooks/useSpeechToText";
+import { PERSONA_LABELS } from "@/lib/personas";
 
 export default function ChatInterface() {
   const [messages, setMessages] = useState<MessageProps[]>([
@@ -19,6 +20,9 @@ export default function ChatInterface() {
   const [isLoading, setIsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isChatLocked, setIsChatLocked] = useState(false);
+  // 진입 시 선택하는 문의 유형. 선택하면 해당 분야 문서 안에서만 검색해
+  // 다른 분야(예: 이용자 문의에 직원용 문서) 자료가 섞이는 것을 막는다.
+  const [persona, setPersona] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -85,6 +89,7 @@ export default function ChatInterface() {
             role: m.role,
             content: m.content,
           })),
+          persona,
         }),
       });
 
@@ -185,6 +190,44 @@ export default function ChatInterface() {
               }}
             />
           ))}
+
+          {/* 진입 유형 선택 — 아직 고르지 않았고 대화 시작 전일 때만 노출 */}
+          {!persona && messages.length === 1 && (
+            <div className="bg-ui-sand rounded-xl p-5 ambient-shadow ghost-border">
+              <p className="font-body-md text-body-md text-deep-umber mb-4">
+                어떤 도움이 필요하신가요? 아래에서 골라 주시면 더 정확하게 안내해 드릴 수 있습니다.
+                <span className="block text-outline mt-1 font-label-md text-label-md">
+                  (고르지 않고 바로 질문하셔도 됩니다.)
+                </span>
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {Object.entries(PERSONA_LABELS).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => setPersona(key)}
+                    className="text-left px-4 py-3 rounded-xl border border-deep-umber/30 bg-canvas-ivory text-deep-umber hover:bg-deep-umber hover:text-canvas-ivory transition-colors font-label-lg text-label-lg"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 선택한 유형 표시 및 변경 */}
+          {persona && (
+            <div className="flex items-center gap-2 self-start">
+              <span className="px-3 py-1.5 rounded-full bg-ui-sand text-deep-umber ghost-border font-label-md text-label-md">
+                {PERSONA_LABELS[persona]}
+              </span>
+              <button
+                onClick={() => setPersona(null)}
+                className="font-label-md text-label-md text-outline underline hover:text-deep-umber transition-colors"
+              >
+                변경
+              </button>
+            </div>
+          )}
 
           {isLoading && (
             <div className="flex gap-4 items-start w-full">

@@ -4,6 +4,7 @@ import {
   applyTone,
   checkGuardrailBlock,
   classifyInquiry,
+  CONTEXT_THRESHOLD,
   cosineSimilarity,
   extractContactAndSummary,
   extractHitlAnswer,
@@ -17,6 +18,7 @@ import {
   isNoAnswerResponse,
   normalizeQuery,
   parseEmbedding,
+  PERSONA_CATEGORIES,
   STRICTNESS_THRESHOLD,
   wantsHuman,
   type BotSettings,
@@ -45,12 +47,14 @@ type MatchRow = { sim: number; content: string; category: string };
 async function hybridSearch(
   queryText: string,
   queryVec: number[],
-  matchCount = 30
+  matchCount = 30,
+  categories: string[] | null = null
 ): Promise<{ vectorMatches: MatchRow[]; keywordMatches: MatchRow[] }> {
   const { data, error } = await supabase.rpc("admin_match_documents", {
     query_embedding: queryVec,
     query_text: queryText,
     match_count: matchCount,
+    filter_categories: categories,
   });
 
   if (!error && data) {
@@ -69,9 +73,11 @@ async function hybridSearch(
     return { vectorMatches, keywordMatches };
   }
 
-  const { data: docs } = await supabase
-    .from("rag_documents")
-    .select("content, category, embedding");
+  let fallbackQuery = supabase.from("rag_documents").select("content, category, embedding");
+  if (categories && categories.length > 0) {
+    fallbackQuery = fallbackQuery.in("category", categories);
+  }
+  const { data: docs } = await fallbackQuery;
 
   const vectorMatches = (docs ?? [])
     .map((doc) => {
@@ -108,9 +114,12 @@ function streamPlainText(text: string) {
 
 export async function POST(req: Request) {
   try {
-    const { messages } = await req.json();
+    const { messages, persona } = await req.json();
     const prompt: string = messages?.[messages.length - 1]?.content ?? "";
     const history: ChatHistoryMessage[] = Array.isArray(messages) ? messages.slice(0, -1) : [];
+    // 진입 화면에서 선택한 문의 유형. 미선택(또는 알 수 없는 값)이면 전체 검색.
+    const personaCategories: string[] | null =
+      (typeof persona === "string" && PERSONA_CATEGORIES[persona]) || null;
 
     if (!prompt.trim()) {
       return streamPlainText("문의 내용을 입력해 주세요.");
@@ -186,9 +195,9 @@ export async function POST(req: Request) {
     // 키가 없거나 호출이 실패하면 원문이 그대로 반환되므로 안전하다.
     const normalizedPrompt = geminiKey ? await normalizeQuery(prompt, geminiKey, history) : prompt;
 
-    // 5. Compliance guardrail — blocks before any LLM call. 오탈자로 키워드 탐지가
-    // 회피되지 않도록 원문+보정문을 함께 검사한다.
-    const blockReason = checkGuardrailBlock(`${prompt} ${normalizedPrompt}`, settings);
+    // 5. Compliance guardrail — 키워드 1차 필터 + LLM 의도 판정(2단계). 오탈자로
+    // 키워드 탐지가 회피되지 않도록 원문+보정문을 함께 검사한다.
+    const blockReason = await checkGuardrailBlock(`${prompt} ${normalizedPrompt}`, settings, geminiKey);
     if (blockReason) {
       const response = applyTone(
         `🚨 **[Fallback 발동]** ${blockReason}\n상세한 안내는 보건소나 센터로 직접 문의 부탁드리며, ${HANDOVER_HINT}`,
@@ -219,7 +228,23 @@ export async function POST(req: Request) {
     // 서버사이드 하이브리드 검색(RPC): 벡터 후보군(matches)은 기존과 동일하게 코사인
     // 임계치 게이트에 사용하고, 키워드 후보군(keywordMatches)은 "3구간"처럼 특정
     // 값/고유명사 질의를 순위와 무관하게 구제하는 용도다.
-    const { vectorMatches: matches, keywordMatches } = await hybridSearch(normalizedPrompt, userVec, 30);
+    let { vectorMatches: matches, keywordMatches } = await hybridSearch(
+      normalizedPrompt, userVec, 30, personaCategories
+    );
+
+    const gateThreshold = STRICTNESS_THRESHOLD[settings.strictness_level] ?? 0.7;
+
+    // 사용자가 진입 유형을 잘못 골랐을 수 있으므로, 필터 검색이 게이트를 통과하지 못하면
+    // 전체 검색으로 한 번 더 시도한다(하드 필터 때문에 답을 잃지 않게 하는 안전장치).
+    let widened = false;
+    if (personaCategories && !(matches.length > 0 && matches[0].sim >= gateThreshold)) {
+      const wide = await hybridSearch(normalizedPrompt, userVec, 30, null);
+      if (wide.vectorMatches.length > 0 && wide.vectorMatches[0].sim >= gateThreshold) {
+        matches = wide.vectorMatches;
+        keywordMatches = wide.keywordMatches;
+        widened = true;
+      }
+    }
 
     // HITL 시맨틱 캐시: 관리자가 이미 검증한 모범 정답과 거의 동일한 질문이면, LLM
     // 재호출 없이 검증 답변을 즉시 반환한다(속도/비용 절감 + 정답 신뢰도 보장).
@@ -227,7 +252,7 @@ export async function POST(req: Request) {
       (m) => m.sim >= HITL_CACHE_THRESHOLD && m.category === "수동학습(HITL)"
     );
 
-    const threshold = STRICTNESS_THRESHOLD[settings.strictness_level] ?? 0.7;
+    const threshold = gateThreshold;
 
     if (hitlCacheHit) {
       const cachedAnswer = extractHitlAnswer(hitlCacheHit.content);
@@ -259,9 +284,11 @@ export async function POST(req: Request) {
       );
     }
 
-    // 임계치를 넘는 상위 문서(최대 5개)를 컨텍스트로 모은다. 행 단위(원자적) 청킹 이후에는
-    // 복합 질문 하나에 필요한 사실이 3개를 넘는 경우가 있어 top-3로는 근거가 밀려날 수 있다.
-    const topMatches = matches.slice(0, 5).filter((m) => m.sim >= threshold);
+    // 컨텍스트에 넣을 문서는 게이트보다 느슨한 기준으로 고른다(단, 게이트보다 엄격해지지
+    // 않도록 min으로 묶는다). 행 단위(원자적) 청킹 이후에는 복합 질문 하나에 필요한 사실이
+    // 3개를 넘는 경우가 있어 상위 5건까지 모은다.
+    const ctxThreshold = Math.min(threshold, CONTEXT_THRESHOLD);
+    const topMatches = matches.filter((m) => m.sim >= ctxThreshold).slice(0, 5);
 
     // "1구간", "8구간"처럼 사용자가 특정 값을 콕 집어 물으면, 벡터 유사도만으로는 원하는
     // 문서가 top-5 밖으로 밀릴 수 있다. hybridSearch()가 pg_trgm 키워드 유사도로 찾아온
@@ -278,6 +305,8 @@ export async function POST(req: Request) {
 
     const contextChunks = topMatches.map((m) => m.content);
     const sourceCategories = Array.from(new Set(topMatches.map((m) => m.category))).sort().join(", ");
+    // 진입 유형과 다른 분야에서 답을 찾았으면 사용자에게 알린다.
+    const scopeNote = widened ? "\n※ 선택하신 분야에 해당 정보가 없어 다른 분야에서 안내드렸습니다." : "";
     const topScore = topMatches[0]?.sim ?? 0;
 
     const { data: providerRows } = await supabaseAdmin
@@ -305,8 +334,8 @@ export async function POST(req: Request) {
       // 키워드 매칭 값은 트라이그램 유사도라 코사인 임계치와 스케일이 달라 나란히
       // 표기하면 오해를 줄 수 있으므로, 벡터 게이트 통과 여부에 따라 출처 표기를 분리한다.
       response = vectorGatePassed
-        ? `${llmAnswer}\n\n**[출처]:** [${sourceCategories}] (유사도 Score: ${topScore.toFixed(2)} / 기준 ${threshold.toFixed(2)})`
-        : `${llmAnswer}\n\n**[출처]:** [${sourceCategories}] (키워드 검색 매칭 · 벡터 유사도 기준 미달)`;
+        ? `${llmAnswer}${scopeNote}\n\n**[출처]:** [${sourceCategories}] (유사도 Score: ${topScore.toFixed(2)} / 기준 ${threshold.toFixed(2)})`
+        : `${llmAnswer}${scopeNote}\n\n**[출처]:** [${sourceCategories}] (키워드 검색 매칭 · 벡터 유사도 기준 미달)`;
     } else {
       // Gemini call failed — fall back to the raw top-matched chunk so the
       // user still gets a grounded answer instead of an error.

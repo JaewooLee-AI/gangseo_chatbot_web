@@ -70,21 +70,93 @@ export interface ChatHistoryMessage {
 // 일반 strictness 임계치보다 훨씬 높은 값으로 "거의 동일 질문"만 즉시 캐시 반환한다.
 export const HITL_CACHE_THRESHOLD = 0.85;
 
+// 컨텍스트 포함 임계치. "답변을 할지 말지"를 정하는 게이트(STRICTNESS_THRESHOLD)와
+// "어떤 문서를 LLM에게 근거로 줄지"를 정하는 기준은 목적이 다르다. 둘 다 게이트 값으로
+// 처리하면 게이트를 겨우 통과한 질문에서 정작 필요한 문서가 컨텍스트에서 빠진다.
+// (실측: '활동지원사로 일하고 싶어요'에서 정답인 '입사 필요 서류'(0.644)가 0.70 컷에
+//  걸려 제외되고 주소/문의처 문서만 LLM에 전달되어 오답이 나갔다.)
+export const CONTEXT_THRESHOLD = 0.55;
+
+// 페르소나 정의는 클라이언트 진입 화면과 공유해야 하므로 lib/personas.ts에 둔다
+// (이 파일은 "server-only"라 클라이언트에서 import할 수 없다).
+export { PERSONA_CATEGORIES, PERSONA_LABELS } from "./personas";
+
 // fallback_logs.failure_type 값: 오답 리뷰(admin 대시보드 Module 02)에서 실패 원인별
 // 분포를 보고 어떤 개선이 가장 시급한지 데이터 기반으로 판단할 수 있게 태깅한다.
 export const FAILURE_TYPE_NO_MATCH = "no_match";
 export const FAILURE_TYPE_LOW_CONFIDENCE = "low_confidence";
 export const FAILURE_TYPE_HUMAN_REQUESTED = "human_requested";
 
-export function checkGuardrailBlock(prompt: string, settings: BotSettings): string | null {
-  if (settings.block_medical && MEDICAL_KEYWORDS.some((k) => prompt.includes(k))) {
-    return "🏥 의료/질병 진단 관련 문의는 컴플라이언스 가드레일에 의해 차단되었습니다.";
+const GUARDRAIL_TOPIC_DESCRIPTIONS: Record<string, string> = {
+  medical: "의료/질병 진단이나 치료·투약에 대한 의학적 조언",
+  legal: "법률적 판단이나 소송·노무 분쟁에 대한 법률 상담",
+  privacy: "주민등록번호·계좌번호 등 민감한 개인정보의 수집이나 취급",
+};
+
+// 가드레일 키워드가 탐지된 질문에 대해, 실제로 차단 대상 '의도'인지를 LLM이 판정한다.
+// 단순 키워드 포함 검사만으로는 "치매 어르신도 서비스 이용할 수 있나요?"(정상적인 서비스
+// 자격 문의)와 "치매 약은 뭘 먹어야 하나요?"(의학적 조언 요청)를 구분할 수 없어, 돌봄센터의
+// 핵심 고객 문의가 대량으로 오차단된다(실측: 정상 질문 6건 중 5건 오차단).
+// 판정 실패 시에는 컴플라이언스 기능의 성격상 보수적으로 true(차단)를 반환한다.
+export async function checkGuardrailIntent(
+  userQuery: string,
+  topic: string,
+  apiKey: string,
+  modelName = "gemini-3.1-flash-lite"
+): Promise<boolean> {
+  if (!apiKey) return true;
+
+  const topicDesc = GUARDRAIL_TOPIC_DESCRIPTIONS[topic] ?? topic;
+
+  const prompt = `당신은 강서나눔돌봄센터(장애인활동지원·가사서비스 제공 기관) AI 상담 챗봇의
+컴플라이언스 판정기입니다. 아래 사용자 질문이 "${topicDesc}"을(를) 실제로 요구하는지 판정하세요.
+
+판정 기준:
+- 사용자가 전문가의 판단(진단/처방/법적 판단 등)을 챗봇에게 요구하면 BLOCK 입니다.
+- 서비스 이용 자격, 신청 절차, 필요 서류, 요금, 채용/근무 조건에 대한 문의는
+  질문에 질병명·법률 용어가 등장하더라도 정상 문의이므로 ALLOW 입니다.
+  (예: "치매 어르신도 서비스 받을 수 있나요?" -> 서비스 자격 문의이므로 ALLOW)
+  (예: "치매에 좋은 약 알려주세요" -> 의학적 조언 요구이므로 BLOCK)
+  (예: "근로계약서는 언제 작성하나요?" -> 채용 절차 문의이므로 ALLOW)
+  (예: "부당해고로 소송하려면 어떻게 하나요?" -> 법률 상담 요구이므로 BLOCK)
+
+다른 설명 없이 BLOCK 또는 ALLOW 중 한 단어만 출력하세요.
+
+[사용자 질문]
+${userQuery}`;
+
+  const verdict = await callGeminiGenerateContent(prompt, apiKey, modelName);
+  if (verdict) {
+    const upper = verdict.trim().toUpperCase();
+    if (upper.includes("ALLOW")) return false;
+    if (upper.includes("BLOCK")) return true;
   }
-  if (settings.block_legal && LEGAL_KEYWORDS.some((k) => prompt.includes(k))) {
-    return "⚖️ 법률/노무 상담 관련 문의는 컴플라이언스 가드레일에 의해 차단되었습니다.";
-  }
-  if (settings.block_privacy && PRIVACY_KEYWORDS.some((k) => prompt.includes(k))) {
-    return "🔒 개인정보 수집이 필요한 문의는 컴플라이언스 가드레일에 의해 차단되었습니다.";
+  return true;
+}
+
+// 2단계 판정: (1) 키워드 사전으로 후보를 싸게 걸러내고, (2) 걸린 질문만 LLM이 의도를 판정한다.
+// 대부분의 질문은 1단계에서 통과하므로 추가 LLM 호출이 발생하지 않는다.
+export async function checkGuardrailBlock(
+  prompt: string,
+  settings: BotSettings,
+  apiKey: string,
+  modelName = "gemini-3.1-flash-lite"
+): Promise<string | null> {
+  const checks: Array<[boolean, string[], string, string]> = [
+    [settings.block_medical, MEDICAL_KEYWORDS, "medical",
+      "🏥 의료/질병 진단 관련 문의는 컴플라이언스 가드레일에 의해 차단되었습니다."],
+    [settings.block_legal, LEGAL_KEYWORDS, "legal",
+      "⚖️ 법률/노무 상담 관련 문의는 컴플라이언스 가드레일에 의해 차단되었습니다."],
+    [settings.block_privacy, PRIVACY_KEYWORDS, "privacy",
+      "🔒 개인정보 수집이 필요한 문의는 컴플라이언스 가드레일에 의해 차단되었습니다."],
+  ];
+
+  for (const [enabled, keywords, topic, reason] of checks) {
+    if (enabled && keywords.some((k) => prompt.includes(k))) {
+      if (await checkGuardrailIntent(prompt, topic, apiKey, modelName)) {
+        return reason;
+      }
+    }
   }
   return null;
 }
