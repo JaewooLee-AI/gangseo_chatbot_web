@@ -61,6 +61,21 @@ export interface BotSettings {
   strictness_level: number;
 }
 
+export interface ChatHistoryMessage {
+  role: string;
+  content: string;
+}
+
+// HITL(관리자 검증 모범 정답)로 등록된 지식은 이미 사람이 확인한 고신뢰 답변이므로,
+// 일반 strictness 임계치보다 훨씬 높은 값으로 "거의 동일 질문"만 즉시 캐시 반환한다.
+export const HITL_CACHE_THRESHOLD = 0.85;
+
+// fallback_logs.failure_type 값: 오답 리뷰(admin 대시보드 Module 02)에서 실패 원인별
+// 분포를 보고 어떤 개선이 가장 시급한지 데이터 기반으로 판단할 수 있게 태깅한다.
+export const FAILURE_TYPE_NO_MATCH = "no_match";
+export const FAILURE_TYPE_LOW_CONFIDENCE = "low_confidence";
+export const FAILURE_TYPE_HUMAN_REQUESTED = "human_requested";
+
 export function checkGuardrailBlock(prompt: string, settings: BotSettings): string | null {
   if (settings.block_medical && MEDICAL_KEYWORDS.some((k) => prompt.includes(k))) {
     return "🏥 의료/질병 진단 관련 문의는 컴플라이언스 가드레일에 의해 차단되었습니다.";
@@ -194,6 +209,64 @@ async function callGeminiGenerateContent(
   const data = await res.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   return text ? text.trim() : null;
+}
+
+// 검색 직전에 사용자 질의를 정규화한다: 오탈자를 교정하고, 지나치게 축약된 단문
+// ("요금은?" 등)은 검색에 유리하도록 완전한 문장으로 보완한다. history가 주어지면
+// "그럼 2구간은요?"처럼 이전 대화에 의존하는 생략/지시 표현도 이전 맥락을 반영해
+// 독립적으로 검색 가능한 완전한 질문으로 풀어쓴다.
+// 키가 없거나 호출이 실패하면 원문을 그대로 반환하여 검색 파이프라인이 항상
+// 안전하게 동작하도록 한다.
+export async function normalizeQuery(
+  userQuery: string,
+  apiKey: string,
+  history: ChatHistoryMessage[] = [],
+  modelName = "gemini-3.1-flash-lite"
+): Promise<string> {
+  if (!apiKey) return userQuery;
+
+  // 최근 3턴(사용자+챗봇 최대 6개 메시지)만 참고한다.
+  const lines: string[] = [];
+  for (const m of history.slice(-6)) {
+    const content = (m.content ?? "").trim();
+    if (!content) continue;
+    const roleLabel = m.role === "user" ? "사용자" : "챗봇";
+    lines.push(`${roleLabel}: ${content}`);
+  }
+  const historyText = lines.length > 0 ? lines.join("\n") : "(이전 대화 없음)";
+
+  const prompt = `다음은 강서나눔돌봄센터 AI 챗봇에 입력된 사용자 질문입니다.
+검색 정확도를 높이기 위해 아래 규칙에 따라 질문을 다듬어 주세요.
+
+규칙:
+1. 오탈자나 띄어쓰기 오류를 자연스럽게 교정하세요.
+2. 지나치게 축약된 단문(예: "요금은?", "자격은요?")은 문맥상 자연스러운 완전한 문장으로 보완하세요.
+3. "그럼 2구간은요?", "거기는 얼마예요?"처럼 이전 대화를 참고해야 뜻이 통하는 생략/지시
+   표현이 있다면, [이전 대화]를 참고하여 무엇을 가리키는지 명확히 풀어써서 그 자체로
+   독립적으로 이해 가능한 질문으로 만드세요. 이전 대화가 없거나 현재 질문과 무관하면
+   이 규칙은 무시하세요.
+4. 질문의 의도나 의미를 절대 바꾸지 마세요. 새로운 정보를 추가하지 마세요.
+5. 다른 설명 없이, 교정된 질문 문장 하나만 출력하세요.
+
+[이전 대화]
+${historyText}
+
+[현재 사용자 질문]
+${userQuery}`;
+
+  const normalized = await callGeminiGenerateContent(prompt, apiKey, modelName);
+  if (normalized) {
+    const trimmed = normalized.trim().replace(/^["']|["']$/g, "");
+    if (trimmed) return trimmed;
+  }
+  return userQuery;
+}
+
+// HITL 모범 정답 청크("질문: ...\n답변: ...")에서 답변 부분만 추출한다.
+// 시맨틱 캐시 히트 시, 질문 원문을 다시 노출하지 않고 답변만 보여주기 위함이다.
+export function extractHitlAnswer(content: string): string {
+  const match = content.match(/답변:\s*([\s\S]+)/);
+  return match ? match[1].trim() : content;
 }
 
 export async function generateChatAnswer(

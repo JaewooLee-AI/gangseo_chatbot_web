@@ -6,14 +6,21 @@ import {
   classifyInquiry,
   cosineSimilarity,
   extractContactAndSummary,
+  extractHitlAnswer,
+  FAILURE_TYPE_HUMAN_REQUESTED,
+  FAILURE_TYPE_LOW_CONFIDENCE,
+  FAILURE_TYPE_NO_MATCH,
   generateChatAnswer,
   generateEmbedding,
   generateInquirySummary,
+  HITL_CACHE_THRESHOLD,
   isNoAnswerResponse,
+  normalizeQuery,
   parseEmbedding,
   STRICTNESS_THRESHOLD,
   wantsHuman,
   type BotSettings,
+  type ChatHistoryMessage,
 } from "@/lib/rag";
 
 const DEFAULT_SETTINGS: BotSettings = {
@@ -25,6 +32,62 @@ const DEFAULT_SETTINGS: BotSettings = {
 };
 
 const HANDOVER_HINT = "**[📞 담당자에게 메시지 남기기]** 버튼을 눌러 접수해 주십시오.";
+
+type MatchRow = { sim: number; content: string; category: string };
+
+// 서버사이드 하이브리드 검색(RPC, admin_match_documents — gangseo_chatbot_admin의
+// supabase/005~006 마이그레이션에서 이 프로젝트와 같은 Supabase DB에 생성됨).
+// pgvector ivfflat 인덱스를 활용한 벡터 후보군과, pg_trgm 트라이그램 유사도로 찾은
+// 키워드 후보군을 함께 받아온다. 후자는 "3구간"처럼 벡터 유사도만으로는 순위가
+// 밀리기 쉬운 특정 값/고유명사 질의를 구제하기 위함이다.
+// RPC가 아직 배포되지 않았거나 호출이 실패하면, 기존 방식인 "전량 조회 후
+// 클라이언트 사이드 코사인 계산"으로 안전하게 대체(fallback)한다.
+async function hybridSearch(
+  queryText: string,
+  queryVec: number[],
+  matchCount = 30
+): Promise<{ vectorMatches: MatchRow[]; keywordMatches: MatchRow[] }> {
+  const { data, error } = await supabase.rpc("admin_match_documents", {
+    query_embedding: queryVec,
+    query_text: queryText,
+    match_count: matchCount,
+  });
+
+  if (!error && data) {
+    const vectorMatches: MatchRow[] = [];
+    const keywordMatches: MatchRow[] = [];
+    for (const row of data as Array<Record<string, unknown>>) {
+      const m: MatchRow = {
+        sim: row.similarity as number,
+        content: row.content as string,
+        category: row.category as string,
+      };
+      if (row.match_source === "vector") vectorMatches.push(m);
+      else keywordMatches.push(m);
+    }
+    vectorMatches.sort((a, b) => b.sim - a.sim);
+    return { vectorMatches, keywordMatches };
+  }
+
+  const { data: docs } = await supabase
+    .from("rag_documents")
+    .select("content, category, embedding");
+
+  const vectorMatches = (docs ?? [])
+    .map((doc) => {
+      const docVec = parseEmbedding(doc.embedding);
+      if (!docVec || docVec.length !== queryVec.length) return null;
+      return {
+        sim: cosineSimilarity(queryVec, docVec),
+        content: doc.content as string,
+        category: doc.category as string,
+      };
+    })
+    .filter((m): m is MatchRow => m !== null)
+    .sort((a, b) => b.sim - a.sim);
+
+  return { vectorMatches, keywordMatches: [] };
+}
 
 function streamPlainText(text: string) {
   const encoder = new TextEncoder();
@@ -47,6 +110,7 @@ export async function POST(req: Request) {
   try {
     const { messages } = await req.json();
     const prompt: string = messages?.[messages.length - 1]?.content ?? "";
+    const history: ChatHistoryMessage[] = Array.isArray(messages) ? messages.slice(0, -1) : [];
 
     if (!prompt.trim()) {
       return streamPlainText("문의 내용을 입력해 주세요.");
@@ -91,6 +155,14 @@ export async function POST(req: Request) {
         );
       }
 
+      // 연락처가 없어 counselor_inquiries에는 적재할 수 없지만, 질문 자체가 유실되지
+      // 않도록 fallback_logs에라도 남겨 관리자가 검토할 수 있게 한다.
+      await supabase.from("fallback_logs").insert({
+        user_query: prompt,
+        status: "pending",
+        failure_type: FAILURE_TYPE_HUMAN_REQUESTED,
+      });
+
       return streamPlainText(
         "불편을 드려 죄송합니다. 담당자가 확인 후 연락드릴 수 있도록 성함과 연락처(예: 010-XXXX-XXXX)를 함께 남겨주시거나, 상단의 [📞 담당자에게 메시지 남기기] 버튼을 이용해 주세요."
       );
@@ -103,8 +175,20 @@ export async function POST(req: Request) {
       .eq("id", 1);
     const settings: BotSettings = (settingsRows?.[0] as BotSettings) ?? DEFAULT_SETTINGS;
 
-    // 3. Compliance guardrail — blocks before any LLM call.
-    const blockReason = checkGuardrailBlock(prompt, settings);
+    // 3. Gemini 키를 먼저 확보한다: 질의 정규화(4단계)가 가드레일 검사보다 먼저
+    // 실행되며 이 키가 필요하기 때문이다.
+    const { data: geminiKey } = await supabaseAdmin.rpc("get_llm_api_key", {
+      p_vendor_id: "gemini",
+    });
+
+    // 4. 질의 정규화: 오탈자 교정 + 축약된 단문을 완전한 문장으로 보완하고, 이전 대화를
+    // 참고해 "그럼 2구간은요?" 같은 생략형 후속 질문을 독립적인 질문으로 풀어쓴다.
+    // 키가 없거나 호출이 실패하면 원문이 그대로 반환되므로 안전하다.
+    const normalizedPrompt = geminiKey ? await normalizeQuery(prompt, geminiKey, history) : prompt;
+
+    // 5. Compliance guardrail — blocks before any LLM call. 오탈자로 키워드 탐지가
+    // 회피되지 않도록 원문+보정문을 함께 검사한다.
+    const blockReason = checkGuardrailBlock(`${prompt} ${normalizedPrompt}`, settings);
     if (blockReason) {
       const response = applyTone(
         `🚨 **[Fallback 발동]** ${blockReason}\n상세한 안내는 보건소나 센터로 직접 문의 부탁드리며, ${HANDOVER_HINT}`,
@@ -112,11 +196,6 @@ export async function POST(req: Request) {
       );
       return streamPlainText(response);
     }
-
-    // 4. RAG: needs the Gemini key (Vault, service_role only) and current model name.
-    const { data: geminiKey } = await supabaseAdmin.rpc("get_llm_api_key", {
-      p_vendor_id: "gemini",
-    });
 
     if (!geminiKey) {
       return streamPlainText(
@@ -127,7 +206,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const userVec = await generateEmbedding(prompt, geminiKey);
+    const userVec = await generateEmbedding(normalizedPrompt, geminiKey);
     if (!userVec) {
       return streamPlainText(
         applyTone(
@@ -137,22 +216,41 @@ export async function POST(req: Request) {
       );
     }
 
-    const { data: docs } = await supabase
-      .from("rag_documents")
-      .select("content, category, embedding");
+    // 서버사이드 하이브리드 검색(RPC): 벡터 후보군(matches)은 기존과 동일하게 코사인
+    // 임계치 게이트에 사용하고, 키워드 후보군(keywordMatches)은 "3구간"처럼 특정
+    // 값/고유명사 질의를 순위와 무관하게 구제하는 용도다.
+    const { vectorMatches: matches, keywordMatches } = await hybridSearch(normalizedPrompt, userVec, 30);
 
-    const matches = (docs ?? [])
-      .map((doc) => {
-        const docVec = parseEmbedding(doc.embedding);
-        if (!docVec || docVec.length !== userVec.length) return null;
-        return { sim: cosineSimilarity(userVec, docVec), content: doc.content as string, category: doc.category as string };
-      })
-      .filter((m): m is { sim: number; content: string; category: string } => m !== null)
-      .sort((a, b) => b.sim - a.sim);
+    // HITL 시맨틱 캐시: 관리자가 이미 검증한 모범 정답과 거의 동일한 질문이면, LLM
+    // 재호출 없이 검증 답변을 즉시 반환한다(속도/비용 절감 + 정답 신뢰도 보장).
+    const hitlCacheHit = matches.find(
+      (m) => m.sim >= HITL_CACHE_THRESHOLD && m.category === "수동학습(HITL)"
+    );
 
     const threshold = STRICTNESS_THRESHOLD[settings.strictness_level] ?? 0.7;
 
-    if (matches.length === 0 || matches[0].sim < threshold) {
+    if (hitlCacheHit) {
+      const cachedAnswer = extractHitlAnswer(hitlCacheHit.content);
+      return streamPlainText(
+        applyTone(
+          `${cachedAnswer}\n\n**[출처]:** 관리자 검증 답변 (HITL 캐시 · 유사도 ${hitlCacheHit.sim.toFixed(2)})`,
+          settings.tone
+        )
+      );
+    }
+
+    // 벡터 임계치를 통과했는지 여부와 별개로 진입한다: "3구간"처럼 벡터 유사도만으로는
+    // 임계치를 넘는 문서가 하나도 없어도, pg_trgm 키워드 검색이 정확 매칭 문서를
+    // 찾아왔다면 그것만으로도 답변을 시도한다.
+    const vectorGatePassed = matches.length > 0 && matches[0].sim >= threshold;
+
+    if (!vectorGatePassed && keywordMatches.length === 0) {
+      // 임계치 이상 문서도, 키워드 매칭 문서도 하나도 없는, 가장 흔한 지식 공백 케이스.
+      await supabase.from("fallback_logs").insert({
+        user_query: prompt,
+        status: "pending",
+        failure_type: FAILURE_TYPE_NO_MATCH,
+      });
       return streamPlainText(
         applyTone(
           `🚨 **[상담사 연결 권장]** 현재 엄격도 설정 기준(유사도 ${threshold.toFixed(2)} 이상)을 충족하는 지식베이스 정보를 찾지 못했습니다.\n${HANDOVER_HINT}`,
@@ -165,14 +263,13 @@ export async function POST(req: Request) {
     // 복합 질문 하나에 필요한 사실이 3개를 넘는 경우가 있어 top-3로는 근거가 밀려날 수 있다.
     const topMatches = matches.slice(0, 5).filter((m) => m.sim >= threshold);
 
-    // "1구간", "8구간"처럼 사용자가 특정 값을 콕 집어 물으면, 벡터 유사도만으로는 원하는 구간이
-    // top-5 밖으로 밀릴 수 있다(본인부담금표처럼 서로 거의 같은 구조의 행이 많은 경우). 질문에
-    // 명시된 구간 번호가 있으면 순위와 무관하게 정확매칭으로 강제 포함한다.
-    const exactTerms = Array.from(new Set(prompt.match(/\d+구간/g) ?? []));
-    if (exactTerms.length > 0) {
+    // "1구간", "8구간"처럼 사용자가 특정 값을 콕 집어 물으면, 벡터 유사도만으로는 원하는
+    // 문서가 top-5 밖으로 밀릴 수 있다. hybridSearch()가 pg_trgm 키워드 유사도로 찾아온
+    // 보조 후보군을 순위와 무관하게 강제 포함한다.
+    if (keywordMatches.length > 0) {
       const already = new Set(topMatches.map((m) => m.content));
-      for (const m of matches) {
-        if (!already.has(m.content) && exactTerms.some((term) => m.content.includes(term))) {
+      for (const m of keywordMatches) {
+        if (!already.has(m.content)) {
           topMatches.push(m);
           already.add(m.content);
         }
@@ -181,7 +278,7 @@ export async function POST(req: Request) {
 
     const contextChunks = topMatches.map((m) => m.content);
     const sourceCategories = Array.from(new Set(topMatches.map((m) => m.category))).sort().join(", ");
-    const topScore = topMatches[0].sim;
+    const topScore = topMatches[0]?.sim ?? 0;
 
     const { data: providerRows } = await supabaseAdmin
       .from("llm_providers")
@@ -189,22 +286,34 @@ export async function POST(req: Request) {
       .eq("vendor_id", "gemini");
     const geminiModel = providerRows?.[0]?.model_name || "gemini-3.1-flash-lite";
 
-    const llmAnswer = await generateChatAnswer(prompt, contextChunks, settings.tone, geminiKey, geminiModel);
+    // 정규화된 질의를 사용한다: 원문 그대로 넘기면 LLM이 무엇을 묻는지 다시 헷갈릴 수
+    // 있으므로, 이미 맥락이 풀린 독립형 질문으로 답변을 생성해야 자연스럽다.
+    const llmAnswer = await generateChatAnswer(normalizedPrompt, contextChunks, settings.tone, geminiKey, geminiModel);
 
     let response: string;
     if (llmAnswer && isNoAnswerResponse(llmAnswer)) {
       // Passed the similarity threshold but the LLM itself says it can't
       // answer from the retrieved context — flag for human review instead
       // of showing a confident-looking non-answer.
-      await supabase.from("fallback_logs").insert({ user_query: prompt, status: "pending" });
+      await supabase.from("fallback_logs").insert({
+        user_query: prompt,
+        status: "pending",
+        failure_type: FAILURE_TYPE_LOW_CONFIDENCE,
+      });
       response = `${llmAnswer}\n\n🚨 **[상담사 연결 권장]** 지식베이스에서 확실한 근거를 찾지 못해 관리자 검토 목록에 등록했습니다. 빠른 확인이 필요하시면 ${HANDOVER_HINT}`;
     } else if (llmAnswer) {
-      response = `${llmAnswer}\n\n**[출처]:** [${sourceCategories}] (유사도 Score: ${topScore.toFixed(2)} / 기준 ${threshold.toFixed(2)})`;
+      // 키워드 매칭 값은 트라이그램 유사도라 코사인 임계치와 스케일이 달라 나란히
+      // 표기하면 오해를 줄 수 있으므로, 벡터 게이트 통과 여부에 따라 출처 표기를 분리한다.
+      response = vectorGatePassed
+        ? `${llmAnswer}\n\n**[출처]:** [${sourceCategories}] (유사도 Score: ${topScore.toFixed(2)} / 기준 ${threshold.toFixed(2)})`
+        : `${llmAnswer}\n\n**[출처]:** [${sourceCategories}] (키워드 검색 매칭 · 벡터 유사도 기준 미달)`;
     } else {
       // Gemini call failed — fall back to the raw top-matched chunk so the
       // user still gets a grounded answer instead of an error.
       const top = topMatches[0];
-      response = `${top.content}\n\n**[출처]:** [${top.category}] (유사도 Score: ${top.sim.toFixed(2)} / 기준 ${threshold.toFixed(2)})`;
+      response = vectorGatePassed
+        ? `${top.content}\n\n**[출처]:** [${top.category}] (유사도 Score: ${top.sim.toFixed(2)} / 기준 ${threshold.toFixed(2)})`
+        : `${top.content}\n\n**[출처]:** [${top.category}] (키워드 검색 매칭 · 벡터 유사도 기준 미달)`;
     }
 
     return streamPlainText(applyTone(response, settings.tone));
