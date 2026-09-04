@@ -5,7 +5,7 @@ import ChatMessage, { MessageProps } from "./ChatMessage";
 import STTButton from "./STTButton";
 import HandoverModal from "../ticket/HandoverModal";
 import { useSpeechToText } from "@/hooks/useSpeechToText";
-import { PERSONA_LABELS } from "@/lib/personas";
+import { PERSONA_LABELS, SERVICES, RELATIONS, personaKey } from "@/lib/personas";
 
 export default function ChatInterface() {
   const [messages, setMessages] = useState<MessageProps[]>([
@@ -26,6 +26,8 @@ export default function ChatInterface() {
   // 선택 카드의 표시 여부는 대화 진행 상황과 무관하게 별도로 관리한다.
   // (messages.length에 묶으면 대화 시작 후 '변경'을 눌렀을 때 카드가 다시 열리지 않는다.)
   const [isPickerOpen, setIsPickerOpen] = useState(true);
+  // 2단계 선택에서 1단계(서비스)만 고른 중간 상태. null이면 아직 서비스 선택 화면.
+  const [draftService, setDraftService] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -196,42 +198,74 @@ export default function ChatInterface() {
             />
           ))}
 
-          {/* 진입 유형 선택 카드 */}
+          {/* 진입 유형 선택 카드 — 8개를 한 번에 늘어놓으면 어르신에게 부담이므로
+              "서비스 -> 관계" 2단계로 나눠 한 화면에 최대 4개만 보이게 한다. */}
           {isPickerOpen && (
             <div className="bg-ui-sand rounded-xl p-5 ambient-shadow ghost-border">
               <p className="font-body-md text-body-md text-deep-umber mb-4">
-                어떤 도움이 필요하신가요? 아래에서 골라 주시면 더 정확하게 안내해 드릴 수 있습니다.
+                {draftService === null
+                  ? "어떤 서비스에 대해 문의하시나요?"
+                  : "어떤 경우에 해당하시나요?"}
                 <span className="block text-outline mt-1 font-label-md text-label-md">
                   (고르지 않고 바로 질문하셔도 됩니다.)
                 </span>
               </p>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {Object.entries(PERSONA_LABELS).map(([key, label]) => (
-                  <button
-                    key={key}
-                    onClick={() => {
-                      setPersona(key);
-                      setIsPickerOpen(false);
-                    }}
-                    className={`text-left px-4 py-3 rounded-xl border transition-colors font-label-lg text-label-lg ${
-                      persona === key
-                        ? "border-deep-umber bg-deep-umber text-canvas-ivory"
-                        : "border-deep-umber/30 bg-canvas-ivory text-deep-umber hover:bg-deep-umber hover:text-canvas-ivory"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
+                {draftService === null
+                  ? SERVICES.map((s) => (
+                      <button
+                        key={s.key}
+                        onClick={() => setDraftService(s.key)}
+                        className="text-left px-4 py-3 rounded-xl border border-deep-umber/30 bg-canvas-ivory text-deep-umber hover:bg-deep-umber hover:text-canvas-ivory transition-colors font-label-lg text-label-lg"
+                      >
+                        {s.label}
+                      </button>
+                    ))
+                  : RELATIONS.map((r) => {
+                      const key = personaKey(draftService, r.key);
+                      return (
+                        <button
+                          key={r.key}
+                          onClick={() => {
+                            setPersona(key);
+                            setIsPickerOpen(false);
+                            setDraftService(null);
+                          }}
+                          className={`text-left px-4 py-3 rounded-xl border transition-colors font-label-lg text-label-lg ${
+                            persona === key
+                              ? "border-deep-umber bg-deep-umber text-canvas-ivory"
+                              : "border-deep-umber/30 bg-canvas-ivory text-deep-umber hover:bg-deep-umber hover:text-canvas-ivory"
+                          }`}
+                        >
+                          {r.label}
+                        </button>
+                      );
+                    })}
               </div>
-              {/* 이미 선택한 유형이 있으면 변경을 취소하고 원래대로 돌아갈 수 있게 한다 */}
-              {persona && (
-                <button
-                  onClick={() => setIsPickerOpen(false)}
-                  className="mt-3 font-label-md text-label-md text-outline underline hover:text-deep-umber transition-colors"
-                >
-                  취소
-                </button>
-              )}
+
+              <div className="mt-3 flex gap-4">
+                {draftService !== null && (
+                  <button
+                    onClick={() => setDraftService(null)}
+                    className="font-label-md text-label-md text-outline underline hover:text-deep-umber transition-colors"
+                  >
+                    이전으로
+                  </button>
+                )}
+                {/* 이미 선택한 유형이 있으면 변경을 취소하고 원래대로 돌아갈 수 있게 한다 */}
+                {persona && (
+                  <button
+                    onClick={() => {
+                      setIsPickerOpen(false);
+                      setDraftService(null);
+                    }}
+                    className="font-label-md text-label-md text-outline underline hover:text-deep-umber transition-colors"
+                  >
+                    취소
+                  </button>
+                )}
+              </div>
             </div>
           )}
 

@@ -341,21 +341,40 @@ export function extractHitlAnswer(content: string): string {
   return match ? match[1].trim() : content;
 }
 
+// hasIntake=true면 컨텍스트에 B_접수(수집 필드 명세) 자료가 섞여 있다는 뜻이다.
+// 이는 질문의 답이 아니라 접수 시 받아야 할 항목이므로, 사실처럼 나열하지 말고
+// "접수를 도와드리겠다"는 안내로 전환하도록 지시한다.
+// hasUnverified=true면 아직 센터 확인을 받지 못한 임시 값이 포함된 것이므로 단정을 피한다.
 export async function generateChatAnswer(
   userQuery: string,
   contextChunks: string[],
   tone: string,
   apiKey: string,
-  modelName: string
+  modelName: string,
+  opts: { hasIntake?: boolean; hasUnverified?: boolean } = {}
 ): Promise<string | null> {
   const toneInstruction = TONE_INSTRUCTIONS[tone] ?? TONE_INSTRUCTIONS["친절한 상담원"];
   const contextText = contextChunks.join("\n---\n");
+
+  let extraRules = "";
+  if (opts.hasIntake) {
+    extraRules +=
+      '\n[참고 자료] 중 "접수 시 필요정보:"로 시작하는 항목은 사용자 질문에 대한 답이 아니라,\n' +
+      "센터가 접수를 처리하기 위해 사용자에게 받아야 할 항목입니다. 이런 항목은 사실처럼\n" +
+      "설명하지 말고, 접수를 도와드리겠다고 안내한 뒤 어떤 정보를 남겨주시면 되는지\n" +
+      "자연스럽게 요청하는 문장으로 바꿔 쓰세요.\n";
+  }
+  if (opts.hasUnverified) {
+    extraRules +=
+      "\n[참고 자료] 중 일부는 아직 센터의 최종 확인을 받지 못한 임시 내용입니다.\n" +
+      "단정적으로 답하지 말고, 정확한 내용은 센터에 확인이 필요하다는 점을 함께 안내하세요.\n";
+  }
 
   const prompt = `당신은 강서나눔돌봄센터의 AI 상담 챗봇입니다. ${toneInstruction}
 아래 [참고 자료]에 있는 내용만 근거로 사용자 질문에 답변하세요.
 참고 자료에 없는 내용은 추측하지 말고 모른다고 답하세요.
 원문을 그대로 나열하지 말고, 사람이 읽기 편한 자연스러운 문장으로 정리해서 답변하세요.
-
+${extraRules}
 [참고 자료]
 ${contextText}
 

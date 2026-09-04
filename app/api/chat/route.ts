@@ -35,7 +35,15 @@ const DEFAULT_SETTINGS: BotSettings = {
 
 const HANDOVER_HINT = "**[📞 담당자에게 메시지 남기기]** 버튼을 눌러 접수해 주십시오.";
 
-type MatchRow = { sim: number; content: string; category: string };
+// docType: A_사실(답변할 지식) / B_접수(직원이 받아적을 수집 필드 명세)
+// verification: 원본확인 / 고객확인필요(아직 센터 확인을 못 받은 임시 값)
+type MatchRow = {
+  sim: number;
+  content: string;
+  category: string;
+  docType: string;
+  verification: string | null;
+};
 
 // 서버사이드 하이브리드 검색(RPC, admin_match_documents — gangseo_chatbot_admin의
 // supabase/005~006 마이그레이션에서 이 프로젝트와 같은 Supabase DB에 생성됨).
@@ -65,6 +73,8 @@ async function hybridSearch(
         sim: row.similarity as number,
         content: row.content as string,
         category: row.category as string,
+        docType: (row.doc_type as string) ?? "A_사실",
+        verification: (row.verification as string) ?? null,
       };
       if (row.match_source === "vector") vectorMatches.push(m);
       else keywordMatches.push(m);
@@ -73,20 +83,24 @@ async function hybridSearch(
     return { vectorMatches, keywordMatches };
   }
 
-  let fallbackQuery = supabase.from("rag_documents").select("content, category, embedding");
+  let fallbackQuery = supabase
+    .from("rag_documents")
+    .select("content, category, embedding, doc_type, verification");
   if (categories && categories.length > 0) {
     fallbackQuery = fallbackQuery.in("category", categories);
   }
   const { data: docs } = await fallbackQuery;
 
   const vectorMatches = (docs ?? [])
-    .map((doc) => {
+    .map((doc): MatchRow | null => {
       const docVec = parseEmbedding(doc.embedding);
       if (!docVec || docVec.length !== queryVec.length) return null;
       return {
         sim: cosineSimilarity(queryVec, docVec),
         content: doc.content as string,
         category: doc.category as string,
+        docType: (doc.doc_type as string) ?? "A_사실",
+        verification: (doc.verification as string) ?? null,
       };
     })
     .filter((m): m is MatchRow => m !== null)
@@ -317,7 +331,15 @@ export async function POST(req: Request) {
 
     // 정규화된 질의를 사용한다: 원문 그대로 넘기면 LLM이 무엇을 묻는지 다시 헷갈릴 수
     // 있으므로, 이미 맥락이 풀린 독립형 질문으로 답변을 생성해야 자연스럽다.
-    const llmAnswer = await generateChatAnswer(normalizedPrompt, contextChunks, settings.tone, geminiKey, geminiModel);
+    // 컨텍스트에 접수 폼 명세(B_접수)나 미검증 내용이 섞였는지 알려, 답변 톤을
+    // 각각 "접수 안내" / "확인 필요" 로 조정하게 한다.
+    const llmAnswer = await generateChatAnswer(
+      normalizedPrompt, contextChunks, settings.tone, geminiKey, geminiModel,
+      {
+        hasIntake: topMatches.some((m) => m.docType === "B_접수"),
+        hasUnverified: topMatches.some((m) => m.verification === "고객확인필요"),
+      }
+    );
 
     let response: string;
     if (llmAnswer && isNoAnswerResponse(llmAnswer)) {
