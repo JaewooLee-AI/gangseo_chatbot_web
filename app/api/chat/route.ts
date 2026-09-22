@@ -6,6 +6,7 @@ import {
   classifyInquiry,
   CONTEXT_THRESHOLD,
   cosineSimilarity,
+  detectAmbiguousService,
   extractContactAndSummary,
   extractHitlAnswer,
   FAILURE_TYPE_HUMAN_REQUESTED,
@@ -247,6 +248,19 @@ export async function POST(req: Request) {
     );
 
     const gateThreshold = STRICTNESS_THRESHOLD[settings.strictness_level] ?? 0.7;
+
+    // 페르소나를 선택하지 않은 채 "얼마예요?"처럼 짧고 일반적인 질문을 하면, 활동지원/
+    // 가사 두 서비스 문서가 거의 같은 점수로 함께 검색되어 근거가 빈약한 쪽으로 우연히
+    // 답이 나갈 수 있다(실측: 동일 질문인데 실행할 때마다 답변/폴백이 오감). 이 경우
+    // 추측하지 않고 어떤 서비스인지 먼저 되묻는다.
+    if (!personaCategories && detectAmbiguousService(matches)) {
+      return streamPlainText(
+        applyTone(
+          "어떤 서비스에 대해 궁금하신가요? \"장애인활동지원\" 또는 \"가사서비스\"라고 말씀해 주시면 더 정확하게 안내해 드릴게요.",
+          settings.tone
+        )
+      );
+    }
 
     // 사용자가 진입 유형을 잘못 골랐을 수 있으므로, 필터 검색이 게이트를 통과하지 못하면
     // 전체 검색으로 한 번 더 시도한다(하드 필터 때문에 답을 잃지 않게 하는 안전장치).

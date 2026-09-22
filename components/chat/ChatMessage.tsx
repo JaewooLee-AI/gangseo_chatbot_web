@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
 
 export interface MessageProps {
   id?: string;
@@ -50,7 +52,9 @@ export default function ChatMessage({
       <div className="flex flex-col gap-1 max-w-[85%]">
         <span className="font-label-md text-label-md text-outline ml-1">AI 어시스턴트</span>
         <div className="bg-ui-sand rounded-xl rounded-tl-sm p-4 md:p-5 text-deep-umber font-body-md text-body-md ambient-shadow flex flex-col gap-3">
-          <div className="whitespace-pre-wrap">{content}</div>
+          <div className="[&_strong]:font-bold [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 [&_p:last-child]:mb-0">
+            <ReactMarkdown remarkPlugins={[remarkBreaks]}>{content}</ReactMarkdown>
+          </div>
 
           {/* Feedback Buttons */}
           <div className="flex items-center gap-2 mt-2 pt-2 border-t border-deep-umber/10">

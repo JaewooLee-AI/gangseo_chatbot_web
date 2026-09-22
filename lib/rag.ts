@@ -81,6 +81,39 @@ export const CONTEXT_THRESHOLD = 0.55;
 // (이 파일은 "server-only"라 클라이언트에서 import할 수 없다).
 export { PERSONA_CATEGORIES, PERSONA_LABELS } from "./personas";
 
+// 카테고리(v4 엑셀 시트명)를 상위 서비스 그룹으로 매핑한다. "0_공통"은 어느 서비스에도
+// 속하지 않는 공통 지식(센터 주소 등)이라 판단 재료에서 제외한다.
+export function inferServiceGroup(category: string): "활동지원" | "가사" | null {
+  if (category.includes("활동지원")) return "활동지원";
+  if (category.includes("가사")) return "가사";
+  return null;
+}
+
+// 페르소나(문의 유형)를 선택하지 않은 채 "얼마예요?", "신청하고 싶어요"처럼 짧고
+// 일반적인 질문을 하면, 활동지원/가사 두 서비스의 문서가 거의 같은 유사도로 함께
+// 검색되어 실제로는 근거가 빈약한 쪽으로 우연히 답이 나갈 수 있다(실측: "얼마예요"가
+// 동일 질문인데도 실행할 때마다 답변/폴백을 오갔다 — 두 서비스 최고점이 0.01~0.02
+// 차이라 임베딩의 미세한 흔들림에 결과가 좌우됨). 이 경우 추측해서 답하는 대신
+// 어떤 서비스인지 먼저 물어보는 것이 더 안전하다.
+export function detectAmbiguousService(
+  matches: Array<{ sim: number; category: string }>,
+  topN = 5,
+  minPlausible = CONTEXT_THRESHOLD,
+  maxGap = 0.05
+): boolean {
+  const bestByGroup: Record<string, number> = {};
+  for (const m of matches.slice(0, topN)) {
+    const group = inferServiceGroup(m.category);
+    if (!group) continue;
+    if (!(group in bestByGroup) || m.sim > bestByGroup[group]) {
+      bestByGroup[group] = m.sim;
+    }
+  }
+  const scores = Object.values(bestByGroup).sort((a, b) => b - a);
+  if (scores.length < 2) return false;
+  return scores[0] >= minPlausible && scores[0] - scores[1] <= maxGap;
+}
+
 // fallback_logs.failure_type 값: 오답 리뷰(admin 대시보드 Module 02)에서 실패 원인별
 // 분포를 보고 어떤 개선이 가장 시급한지 데이터 기반으로 판단할 수 있게 태깅한다.
 export const FAILURE_TYPE_NO_MATCH = "no_match";
@@ -267,14 +300,19 @@ export async function generateEmbedding(
 async function callGeminiGenerateContent(
   prompt: string,
   apiKey: string,
-  modelName: string
+  modelName: string,
+  temperature?: number
 ): Promise<string | null> {
+  const body: Record<string, unknown> = { contents: [{ parts: [{ text: prompt }] }] };
+  if (temperature !== undefined) {
+    body.generationConfig = { temperature };
+  }
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`,
     {
       method: "POST",
       headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      body: JSON.stringify(body),
     }
   );
   if (!res.ok) return null;
@@ -330,7 +368,9 @@ ${historyText}
 [현재 사용자 질문]
 ${userQuery}`;
 
-  const normalized = await callGeminiGenerateContent(prompt, apiKey, modelName);
+  // temperature=0: 같은 질문이라도 매번 다르게 정규화되면 임베딩이 흔들려 임계치 근처에서
+  // 답변/폴백이 오락가락하는 원인이 된다(실측 확인). 정규화는 결정론적 교정이어야 한다.
+  const normalized = await callGeminiGenerateContent(prompt, apiKey, modelName, 0);
   if (normalized) {
     const trimmed = normalized.trim().replace(/^["']|["']$/g, "");
     if (trimmed) return trimmed;
