@@ -13,13 +13,22 @@ export async function getGeminiApiKey(
   supabaseAdmin: SupabaseClient
 ): Promise<string | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
-    const { data, error } = await supabaseAdmin.rpc("get_llm_api_key", {
+    const res = await supabaseAdmin.rpc("get_llm_api_key", {
       p_vendor_id: "gemini",
     });
-    if (error) {
-      console.error(`get_llm_api_key RPC error (attempt ${attempt + 1}/2):`, error);
-    } else if (data) {
-      return data as string;
+    // TEMP DIAGNOSTIC: log every attempt (not just errors) to characterize an
+    // intermittent Cloudflare-Workers-only failure where both `data` and
+    // `error` come back falsy with no exception thrown — remove once root
+    // caused (see conversation 2026-09-23).
+    console.log(`get_llm_api_key RPC attempt ${attempt + 1}/2:`, {
+      hasData: !!res.data,
+      dataLength: typeof res.data === "string" ? res.data.length : null,
+      error: res.error,
+      status: res.status,
+      statusText: res.statusText,
+    });
+    if (res.data) {
+      return res.data as string;
     }
     if (attempt === 0) {
       await new Promise((r) => setTimeout(r, 300));
