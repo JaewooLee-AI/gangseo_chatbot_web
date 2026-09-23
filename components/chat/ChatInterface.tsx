@@ -273,6 +273,20 @@ export default function ChatInterface() {
                     이전으로
                   </button>
                 )}
+                {/* 한번 유형을 고르면 되돌릴 방법이 없었다. 특정 분야에 매이지 않고
+                    전체에서 찾고 싶을 때를 위해 명시적으로 해제할 수 있게 한다. */}
+                {persona && (
+                  <button
+                    onClick={() => {
+                      setPersona(null);
+                      setIsPickerOpen(false);
+                      setDraftService(null);
+                    }}
+                    className="font-label-md text-label-md text-outline underline hover:text-deep-umber transition-colors"
+                  >
+                    유형 없이 전체에서 찾기
+                  </button>
+                )}
                 {/* 이미 선택한 유형이 있으면 변경을 취소하고 원래대로 돌아갈 수 있게 한다 */}
                 {persona && (
                   <button
@@ -337,21 +351,51 @@ export default function ChatInterface() {
               입력창 바로 위에 고정해 항상 같은 자리에서 보이게 한다. 이전에는 칩 옆의
               작은 회색 밑줄 "변경"이었는데, 만든 사람조차 못 찾을 만큼 눈에 띄지
               않았다(주 이용자가 어르신이라 더 불리하다). */}
-          {persona && !isPickerOpen && (
+          {/* 유형을 고르지 않은 상태(처음부터 건너뛰었거나 직접 해제한 경우)에서도
+              선택 화면을 다시 열 수 있어야 한다. 이 버튼이 없으면 한번 닫힌 뒤로는
+              유형을 지정할 방법이 사라진다. */}
+          {!persona && !isPickerOpen && (
             <div className="flex items-center gap-2 mb-2 flex-wrap">
-              <span className="px-3 py-1.5 rounded-full bg-ui-sand text-deep-umber ghost-border font-label-lg text-label-lg">
-                {PERSONA_LABELS[persona]}
-              </span>
               <button
                 type="button"
                 onClick={() => setIsPickerOpen(true)}
                 className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-deep-umber/40 bg-canvas-ivory text-deep-umber hover:bg-deep-umber hover:text-canvas-ivory transition-colors font-label-lg text-label-lg"
               >
                 <span className="material-symbols-outlined" style={{ fontSize: "18px" }}>
-                  swap_horiz
+                  tune
                 </span>
-                문의 유형 바꾸기
+                문의 유형 선택하기
               </button>
+              <span className="font-label-md text-label-md text-outline">
+                지금은 전체에서 찾고 있어요
+              </span>
+            </div>
+          )}
+
+          {persona && (
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <span className="px-3 py-1.5 rounded-full bg-ui-sand text-deep-umber ghost-border font-label-lg text-label-lg">
+                {PERSONA_LABELS[persona]}
+              </span>
+              {/* 선택 화면이 열려 있는 동안에도 칩을 계속 보여준다. 예전에는 칩이 숨겨져
+                  아무것도 선택 안 된 것처럼 보였는데, 실제로는 이전 유형이 그대로
+                  적용되고 있다가 질문을 보내는 순간 칩이 다시 나타나 혼란스러웠다. */}
+              {isPickerOpen ? (
+                <span className="font-label-md text-label-md text-outline">
+                  고르지 않으면 이 유형이 그대로 적용됩니다
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsPickerOpen(true)}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-deep-umber/40 bg-canvas-ivory text-deep-umber hover:bg-deep-umber hover:text-canvas-ivory transition-colors font-label-lg text-label-lg"
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: "18px" }}>
+                    swap_horiz
+                  </span>
+                  문의 유형 바꾸기
+                </button>
+              )}
             </div>
           )}
           <div className="relative flex items-center bg-canvas-ivory border border-ui-stone focus-within:border-deep-umber rounded-xl p-1 transition-colors ambient-shadow">
