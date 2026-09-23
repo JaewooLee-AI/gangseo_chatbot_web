@@ -1,8 +1,32 @@
 import "server-only";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 // Ported from gangseo_chatbot_admin/core/rag_engine.py and
 // modules/06_simulator.py — keep these two files in sync when the admin
 // side's guardrail/threshold/prompt logic changes.
+
+// get_llm_api_key RPC(Supabase Vault 조회)가 Cloudflare Workers 환경에서 간헐적으로
+// 에러 없이 빈 값을 반환하는 현상이 관찰됐다(실측: 몇 초 간격의 재요청 중 한 번만
+// 실패). 원인 진단을 위해 에러를 반드시 로그로 남기고, 일시적 네트워크 문제일
+// 가능성이 높으므로 한 번 재시도한다.
+export async function getGeminiApiKey(
+  supabaseAdmin: SupabaseClient
+): Promise<string | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { data, error } = await supabaseAdmin.rpc("get_llm_api_key", {
+      p_vendor_id: "gemini",
+    });
+    if (error) {
+      console.error(`get_llm_api_key RPC error (attempt ${attempt + 1}/2):`, error);
+    } else if (data) {
+      return data as string;
+    }
+    if (attempt === 0) {
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+  return null;
+}
 
 export const STRICTNESS_THRESHOLD: Record<number, number> = {
   1: 0.5,

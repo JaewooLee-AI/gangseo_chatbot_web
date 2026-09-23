@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { classifyInquiry, generateInquirySummary } from "@/lib/rag";
+import { classifyInquiry, generateInquirySummary, getGeminiApiKey } from "@/lib/rag";
 
 export async function POST(req: Request) {
   try {
@@ -15,9 +15,7 @@ export async function POST(req: Request) {
 
     // Fallback if the LLM call is unavailable/fails — same naive slice as before.
     let summary = message.length > 60 ? `${message.slice(0, 60)}...` : message;
-    const { data: geminiKey } = await supabaseAdmin.rpc("get_llm_api_key", {
-      p_vendor_id: "gemini",
-    });
+    const geminiKey = await getGeminiApiKey(supabaseAdmin);
     if (geminiKey) {
       const { data: providerRows } = await supabaseAdmin
         .from("llm_providers")

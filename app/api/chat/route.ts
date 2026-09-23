@@ -15,6 +15,7 @@ import {
   generateChatAnswer,
   generateEmbedding,
   generateInquirySummary,
+  getGeminiApiKey,
   HITL_CACHE_THRESHOLD,
   isNoAnswerResponse,
   normalizeQuery,
@@ -149,9 +150,7 @@ export async function POST(req: Request) {
 
         // Fallback if the LLM call is unavailable/fails — same naive slice as before.
         let summary = fallbackSummary;
-        const { data: geminiKeyForSummary } = await supabaseAdmin.rpc("get_llm_api_key", {
-          p_vendor_id: "gemini",
-        });
+        const geminiKeyForSummary = await getGeminiApiKey(supabaseAdmin);
         if (geminiKeyForSummary) {
           const { data: providerRows } = await supabaseAdmin
             .from("llm_providers")
@@ -201,9 +200,7 @@ export async function POST(req: Request) {
 
     // 3. Gemini 키를 먼저 확보한다: 질의 정규화(4단계)가 가드레일 검사보다 먼저
     // 실행되며 이 키가 필요하기 때문이다.
-    const { data: geminiKey } = await supabaseAdmin.rpc("get_llm_api_key", {
-      p_vendor_id: "gemini",
-    });
+    const geminiKey = await getGeminiApiKey(supabaseAdmin);
 
     // 4. 질의 정규화: 오탈자 교정 + 축약된 단문을 완전한 문장으로 보완하고, 이전 대화를
     // 참고해 "그럼 2구간은요?" 같은 생략형 후속 질문을 독립적인 질문으로 풀어쓴다.
@@ -212,7 +209,7 @@ export async function POST(req: Request) {
 
     // 5. Compliance guardrail — 키워드 1차 필터 + LLM 의도 판정(2단계). 오탈자로
     // 키워드 탐지가 회피되지 않도록 원문+보정문을 함께 검사한다.
-    const blockReason = await checkGuardrailBlock(`${prompt} ${normalizedPrompt}`, settings, geminiKey);
+    const blockReason = await checkGuardrailBlock(`${prompt} ${normalizedPrompt}`, settings, geminiKey ?? "");
     if (blockReason) {
       const response = applyTone(
         `🚨 **[Fallback 발동]** ${blockReason}\n상세한 안내는 보건소나 센터로 직접 문의 부탁드리며, ${HANDOVER_HINT}`,
