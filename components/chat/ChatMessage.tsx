@@ -3,11 +3,17 @@
 import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
+import type { HandoverPrefill } from "@/lib/handover";
 
 export interface MessageProps {
   id?: string;
   role: "user" | "assistant";
   content: string;
+  // 서버가 "이 답변은 접수가 필요하다"고 알려온 경우. 말풍선 바로 아래에 접수 버튼을
+  // 띄운다 — 답변 문구의 "아래 [담당자에게 메시지 남기기] 버튼"이 가리키는 대상이다.
+  handover?: HandoverPrefill;
+  handoverLabel?: string;
+  onHandover?: () => void;
   onDislike?: () => void;
   onLike?: () => void;
 }
@@ -15,6 +21,9 @@ export interface MessageProps {
 export default function ChatMessage({
   role,
   content,
+  handover,
+  handoverLabel,
+  onHandover,
   onDislike,
   onLike,
 }: MessageProps) {
@@ -55,6 +64,19 @@ export default function ChatMessage({
           <div className="[&_strong]:font-bold [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 [&_p:last-child]:mb-0">
             <ReactMarkdown remarkPlugins={[remarkBreaks]}>{content}</ReactMarkdown>
           </div>
+
+          {handover && onHandover && (
+            <button
+              type="button"
+              onClick={onHandover}
+              className="self-start flex items-center gap-2 px-5 py-3 border border-deep-umber bg-deep-umber text-canvas-ivory hover:bg-opacity-90 transition-colors rounded-full font-label-lg text-label-lg shadow-sm"
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: "20px" }}>
+                support_agent
+              </span>
+              {handoverLabel}
+            </button>
+          )}
 
           {/* Feedback Buttons */}
           <div className="flex items-center gap-2 mt-2 pt-2 border-t border-deep-umber/10">

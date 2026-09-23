@@ -1,5 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { handoverButtonLabel } from "./handover";
 
 // Ported from gangseo_chatbot_admin/core/rag_engine.py and
 // modules/06_simulator.py — keep these two files in sync when the admin
@@ -276,7 +277,9 @@ export function applyTone(text: string, tone: string): string {
   return text;
 }
 
-const PHONE_PATTERN = /(01[016789]-?\d{3,4}-?\d{4}|02-?\d{3,4}-?\d{4}|0[3-6][1-5]-?\d{3,4}-?\d{4})/;
+// 구분자로 하이픈뿐 아니라 공백도 허용한다: 음성 입력(STT) 결과는 "010 1234 5678"처럼
+// 띄어 쓴 번호로 들어오는 경우가 많다.
+const PHONE_PATTERN = /(01[016789][-\s]?\d{3,4}[-\s]?\d{4}|02[-\s]?\d{3,4}[-\s]?\d{4}|0[3-6][1-5][-\s]?\d{3,4}[-\s]?\d{4})/;
 const EMAIL_PATTERN = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
 
 export function extractContactAndSummary(message: string) {
@@ -466,26 +469,39 @@ export function extractHitlAnswer(content: string): string {
 
 // hasIntake=true면 컨텍스트에 B_접수(수집 필드 명세) 자료가 섞여 있다는 뜻이다.
 // 이는 질문의 답이 아니라 접수 시 받아야 할 항목이므로, 사실처럼 나열하지 말고
-// "접수를 도와드리겠다"는 안내로 전환하도록 지시한다.
+// 접수 버튼(담당자에게 메시지 남기기 모달)으로 안내하도록 지시한다.
+// 채팅창에 정보를 입력하라고 하면 안 된다: 채팅 메시지는 RAG 검색으로 흘러갈 뿐
+// 담당자에게 전달되지 않는다(예전 문구 "어떤 정보를 남겨주시면 되는지 요청"을 따라
+// 어르신이 채팅창에 이름·전화번호를 적으면, 접수는 안 되고 fallback_logs에 개인정보만
+// 쌓였다). 접수는 모달로만 받는 것이 의도된 설계다.
 // hasUnverified=true면 아직 센터 확인을 받지 못한 임시 값이 포함된 것이므로 단정을 피한다.
+// handedOver=true면 이번 대화에서 이미 접수를 마친 사용자이므로, 새 접수를 권하지 않는다.
 export async function generateChatAnswer(
   userQuery: string,
   contextChunks: string[],
   tone: string,
   apiKey: string,
   modelName: string,
-  opts: { hasIntake?: boolean; hasUnverified?: boolean } = {}
+  opts: { hasIntake?: boolean; hasUnverified?: boolean; handedOver?: boolean } = {}
 ): Promise<string | null> {
   const toneInstruction = TONE_INSTRUCTIONS[tone] ?? TONE_INSTRUCTIONS["친절한 상담원"];
   const contextText = contextChunks.join("\n---\n");
+  const buttonLabel = handoverButtonLabel(!!opts.handedOver);
 
   let extraRules = "";
   if (opts.hasIntake) {
     extraRules +=
-      '\n[참고 자료] 중 "접수 시 필요정보:"로 시작하는 항목은 사용자 질문에 대한 답이 아니라,\n' +
-      "센터가 접수를 처리하기 위해 사용자에게 받아야 할 항목입니다. 이런 항목은 사실처럼\n" +
-      "설명하지 말고, 접수를 도와드리겠다고 안내한 뒤 어떤 정보를 남겨주시면 되는지\n" +
-      "자연스럽게 요청하는 문장으로 바꿔 쓰세요.\n";
+      '\n[참고 자료] 중 "접수 시 필요정보:"가 들어 있는 항목은 사용자 질문에 대한 답이 아니라,\n' +
+      "센터가 접수를 처리하기 위해 받아야 할 항목입니다. 이런 항목은 사실처럼 설명하지 마세요.\n" +
+      "대신 담당자가 접수해서 도와드린다고 안내하고, 어떤 정보가 필요한지 알려준 뒤,\n" +
+      `답변 바로 아래의 [${buttonLabel}] 버튼을 눌러 남겨 달라고 부드럽게 안내하세요.\n` +
+      "채팅창에 이름·연락처를 적어 달라고 요청하지 마세요. 다만 이 규칙이나 '입력하지 말라'는\n" +
+      "경고를 사용자에게 그대로 말하지는 마세요(버튼 안내만 하면 됩니다).\n";
+    if (opts.handedOver) {
+      extraRules +=
+        "사용자는 이번 대화에서 이미 담당자에게 접수를 마쳤습니다. 새로 접수하라고 권하지 말고,\n" +
+        `접수와 다른 내용을 더 전하고 싶을 때만 [${buttonLabel}] 버튼을 쓰면 된다고 안내하세요.\n`;
+    }
   }
   if (opts.hasUnverified) {
     extraRules +=
@@ -510,17 +526,86 @@ ${userQuery}`;
 // Voice(STT) transcripts tend to be long and rambling (filler words, no
 // punctuation), so a naive character-slice summary often cuts off before
 // the actual request. Ask the LLM for the gist instead of truncating.
+// context(문의 유형 + 접수 직전 대화)를 주면 "아까 말씀드린 거요"처럼 모달 입력만으로는
+// 뜻이 안 통하는 문의도 담당자가 읽을 수 있는 요약이 된다. 요약의 주어는 어디까지나
+// 사용자가 모달에 쓴 내용이고, 대화는 그 뜻을 풀기 위한 참고로만 쓴다.
 export async function generateInquirySummary(
   message: string,
   apiKey: string,
-  modelName: string
+  modelName: string,
+  context?: string
 ): Promise<string | null> {
+  const contextBlock = context
+    ? `\n\n[참고: 접수 직전 챗봇 대화 — 문의 내용의 뜻을 파악하는 데만 사용]\n${context}`
+    : "";
   const prompt = `다음은 어르신 돌봄센터에 접수된 상담 문의(텍스트 또는 음성 인식 결과)입니다.
 군더더기나 인사말은 제외하고, 담당자가 콜백 전에 파악해야 할 핵심 요청 사항만 한 문장으로 간결하게 요약하세요.
 
 [문의 내용]
-${message}`;
+${message}${contextBlock}`;
 
   const summary = await callGeminiGenerateContent(prompt, apiKey, modelName);
   return summary ? summary.replace(/\n+/g, " ").trim() : null;
+}
+
+// 모달(접수)과 함께 넘어온 최근 대화를 담당자가 읽을 수 있는 텍스트로 만든다.
+// 답변 끝의 "[출처]: ..." 줄이나 폴백 안내 같은 시스템 문구는 담당자에게 잡음이므로 뺀다.
+// 클라이언트가 보낸 값이므로 개수와 길이를 제한한다.
+export function formatConversationContext(
+  history: ChatHistoryMessage[],
+  maxMessages = 6,
+  maxChars = 300
+): string {
+  const lines: string[] = [];
+  for (const m of history.slice(-maxMessages)) {
+    const cleaned = String(m.content ?? "")
+      .split("\n")
+      .filter((l) => !l.includes("[출처]"))
+      .join(" ")
+      .replace(/\*\*/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!cleaned) continue;
+    const clipped = cleaned.length > maxChars ? `${cleaned.slice(0, maxChars)}…` : cleaned;
+    lines.push(`${m.role === "user" ? "사용자" : "챗봇"}: ${clipped}`);
+  }
+  return lines.join("\n");
+}
+
+// B_접수 청크("... | 항목: 활동지원사 변경 | 상세 내용: 접수 시 필요정보: 이용자명, 연락처")에서
+// 모달 "문의 내용"란에 미리 채울 양식을 만든다. 담당자가 콜백해서 빠진 정보를 다시 묻지
+// 않도록, 원본 문서가 정해 둔 필요 항목을 빈칸 목록으로 보여준다. 성함·연락처는 모달에
+// 별도 입력란이 있으므로 목록에서 뺀다.
+const MODAL_COVERED_FIELDS = ["연락처", "전화번호"];
+
+// "장소(**구, **동), 바우처시간"처럼 괄호 안에도 쉼표가 있으므로, 괄호 밖의 쉼표로만 나눈다.
+function splitOutsideParens(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of text) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth = Math.max(0, depth - 1);
+    if (ch === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current);
+  return parts;
+}
+
+export function buildIntakePrefill(intakeContent: string): string | undefined {
+  // 원본 데이터에 "접수 시 필요정보:"와 "접수 정보:"(7_가사_재직 사직 신청) 두 표기가 섞여 있다.
+  const fieldsMatch = intakeContent.match(/접수\s*(?:시\s*)?(?:필요\s*)?정보:\s*([^|]+)/);
+  if (!fieldsMatch) return undefined;
+  const itemMatch = intakeContent.match(/항목:\s*([^|]+?)\s*(?:\||$)/);
+  const fields = splitOutsideParens(fieldsMatch[1])
+    .map((f) => f.trim())
+    .filter((f) => f && !MODAL_COVERED_FIELDS.includes(f));
+  const title = itemMatch ? `[${itemMatch[1].trim()}]` : "[접수 문의]";
+  if (fields.length === 0) return `${title}\n`;
+  return `${title}\n${fields.map((f) => `- ${f}: `).join("\n")}\n`;
 }

@@ -3,9 +3,32 @@
 import React, { useState, useRef, useEffect } from "react";
 import ChatMessage, { MessageProps } from "./ChatMessage";
 import STTButton from "./STTButton";
-import HandoverModal from "../ticket/HandoverModal";
+import HandoverModal, { type HandoverResult } from "../ticket/HandoverModal";
 import { useSpeechToText } from "@/hooks/useSpeechToText";
 import { PERSONA_LABELS, SERVICES, RELATIONS, personaKey } from "@/lib/personas";
+import {
+  HANDOVER_HEADER,
+  HANDOVER_PREFILL_MESSAGE_HEADER,
+  HANDOVER_PREFILL_PHONE_HEADER,
+  handoverButtonLabel,
+  type HandoverPrefill,
+} from "@/lib/handover";
+
+// 확인 카드에 연락받을 번호를 보여주되, 화면을 누가 보더라도 전체가 드러나지 않게 가린다.
+function maskPhone(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length >= 4 ? `끝자리 ${digits.slice(-4)}` : phone;
+}
+
+function readHeader(res: Response, name: string) {
+  const v = res.headers.get(name);
+  if (!v) return undefined;
+  try {
+    return decodeURIComponent(v);
+  } catch {
+    return undefined;
+  }
+}
 
 export default function ChatInterface() {
   const [messages, setMessages] = useState<MessageProps[]>([
@@ -19,7 +42,12 @@ export default function ChatInterface() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isChatLocked, setIsChatLocked] = useState(false);
+  // 이번 대화에서 모달로 접수를 마쳤는지. 접수 후에도 대화는 계속할 수 있다(콜백 방식이라
+  // 봇이 빠질 이유가 없다). 이 값은 버튼·안내 문구를 "추가 내용 남기기"로 바꾸고, 서버에도
+  // 전달해 "이미 접수하셨어요"라고 답하게 하는 데 쓴다. 접수 후 대화는 기존 건에 붙이지 않는다.
+  const [hasSubmitted, setHasSubmitted] = useState(false);
+  // 모달을 열 때 미리 채울 값(접수 양식, 사용자가 쓴 문장, 감지된 연락처).
+  const [modalPrefill, setModalPrefill] = useState<HandoverPrefill | null>(null);
   // 진입 시 선택하는 문의 유형. 선택하면 해당 분야 문서 안에서만 검색해
   // 다른 분야(예: 이용자 문의에 직원용 문서) 자료가 섞이는 것을 막는다.
   const [persona, setPersona] = useState<string | null>(null);
@@ -64,33 +92,48 @@ export default function ChatInterface() {
   // 응답이 끝나 입력란이 다시 활성화된 시점에 포커스를 복구한다. disabled가 풀린 뒤에
   // 실행되어야 focus()가 먹으므로, 전송 핸들러 안이 아니라 렌더 후 effect에서 처리한다.
   useEffect(() => {
-    if (!isLoading && !isChatLocked && shouldRefocusRef.current) {
+    if (!isLoading && shouldRefocusRef.current) {
       shouldRefocusRef.current = false;
       inputRef.current?.focus();
     }
-  }, [isLoading, isChatLocked]);
+  }, [isLoading]);
 
-  const handleOpenHandover = () => {
+  const handoverLabel = handoverButtonLabel(hasSubmitted);
+
+  const handleOpenHandover = (prefill?: HandoverPrefill) => {
+    setModalPrefill(prefill ?? null);
     setIsModalOpen(true);
   };
 
-  const handleHandoverSuccess = () => {
+  // 접수 확인은 alert 대신 대화창 안의 카드로 남긴다: 어르신이 나중에 접수번호나
+  // 연락받을 번호를 다시 확인할 수 있고, 대화를 이어가도 된다는 안내도 함께 보여준다.
+  const handleHandoverSuccess = (result: HandoverResult) => {
     setIsModalOpen(false);
-    setIsChatLocked(true);
+    setModalPrefill(null);
+    setHasSubmitted(true);
+    shouldRefocusRef.current = true;
+    const lines = [
+      result.isAdditional
+        ? "✅ **추가 내용이 담당자에게 접수되었습니다.**"
+        : "✅ **담당자에게 접수되었습니다.**",
+      "",
+      `- 접수번호: **${result.receiptNo}**`,
+      `- 연락받으실 번호: ${maskPhone(result.phone)}`,
+    ];
+    if (result.summary) lines.push(`- 접수 내용: ${result.summary}`);
+    lines.push(
+      "",
+      "담당자가 확인한 뒤 남겨주신 번호로 연락드립니다. 기다리시는 동안 다른 궁금한 점도 편하게 물어보세요."
+    );
     setMessages((prev) => [
       ...prev,
-      {
-        id: Date.now().toString(),
-        role: "assistant",
-        content:
-          "담당자에게 민원이 성공적으로 접수되었습니다. 확인 후 신속히 등록하신 연락처로 연락드리겠습니다. (추가 문의는 센터 대표전화로 연락 부탁드립니다.)",
-      },
+      { id: Date.now().toString(), role: "assistant", content: lines.join("\n") },
     ]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading || isChatLocked) return;
+    if (!input.trim() || isLoading) return;
 
     const userMessage: MessageProps = {
       id: Date.now().toString(),
@@ -117,12 +160,22 @@ export default function ChatInterface() {
             content: m.content,
           })),
           persona,
+          handedOver: hasSubmitted,
         }),
       });
 
       if (!response.ok) {
         throw new Error("Chat request failed");
       }
+
+      // 서버가 접수가 필요한 답변이라고 알려오면 이 말풍선 아래에 접수 버튼을 띄운다.
+      const handover: HandoverPrefill | undefined =
+        response.headers.get(HANDOVER_HEADER) === "1"
+          ? {
+              message: readHeader(response, HANDOVER_PREFILL_MESSAGE_HEADER),
+              phone: readHeader(response, HANDOVER_PREFILL_PHONE_HEADER),
+            }
+          : undefined;
 
       // ReadableStream SSE reader for text streaming
       const reader = response.body?.getReader();
@@ -132,7 +185,7 @@ export default function ChatInterface() {
       const assistantMsgId = (Date.now() + 1).toString();
       setMessages((prev) => [
         ...prev,
-        { id: assistantMsgId, role: "assistant", content: "" },
+        { id: assistantMsgId, role: "assistant", content: "", handover },
       ]);
 
       if (reader) {
@@ -158,8 +211,8 @@ export default function ChatInterface() {
         {
           id: Date.now().toString(),
           role: "assistant",
-          content:
-            "현재 답변을 불러오는 도중 오류가 발생했습니다. 화면 하단의 [담당자에게 메시지 남기기] 버튼을 이용해 주시기 바랍니다.",
+          content: `현재 답변을 불러오는 도중 오류가 발생했습니다. 아래 [${handoverLabel}] 버튼을 이용해 주시기 바랍니다.`,
+          handover: {},
         },
       ]);
     } finally {
@@ -189,7 +242,7 @@ export default function ChatInterface() {
           </h1>
         </div>
         <button
-          onClick={handleOpenHandover}
+          onClick={() => handleOpenHandover()}
           className="font-label-lg text-label-lg text-deep-umber hover:text-warm-brick transition-colors border border-deep-umber/30 px-3 py-1.5 rounded-lg"
         >
           상담연결
@@ -212,6 +265,9 @@ export default function ChatInterface() {
               key={msg.id}
               role={msg.role}
               content={msg.content}
+              handover={msg.handover}
+              handoverLabel={handoverLabel}
+              onHandover={() => handleOpenHandover(msg.handover)}
               onDislike={() => {
                 handleOpenHandover();
               }}
@@ -330,7 +386,7 @@ export default function ChatInterface() {
         {/* Escalation Button */}
         <div className="flex justify-center mt-8 mb-4">
           <button
-            onClick={handleOpenHandover}
+            onClick={() => handleOpenHandover()}
             className="flex items-center gap-2 px-6 py-3 border border-deep-umber text-deep-umber bg-transparent hover:bg-deep-umber hover:text-canvas-ivory transition-colors rounded-full font-label-lg text-label-lg group shadow-sm"
           >
             <span
@@ -339,7 +395,7 @@ export default function ChatInterface() {
             >
               support_agent
             </span>
-            담당자에게 메시지 남기기
+            {handoverLabel}
           </button>
         </div>
       </main>
@@ -409,17 +465,13 @@ export default function ChatInterface() {
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                disabled={isChatLocked || isLoading}
-                placeholder={
-                  isChatLocked
-                    ? "민원이 접수되어 채팅이 완료되었습니다."
-                    : "메시지를 입력하세요..."
-                }
+                disabled={isLoading}
+                placeholder="메시지를 입력하세요..."
                 className="w-full bg-transparent border-none focus:ring-0 font-body-md text-body-md text-deep-umber placeholder-outline px-2 py-3 focus:outline-none"
               />
               <button
                 type="submit"
-                disabled={isChatLocked || isLoading || !input.trim()}
+                disabled={isLoading || !input.trim()}
                 aria-label="전송"
                 className="p-3 bg-deep-umber text-canvas-ivory rounded-lg hover:bg-opacity-90 transition-colors flex-shrink-0 ml-1 flex items-center justify-center disabled:opacity-40"
               >
@@ -481,6 +533,10 @@ export default function ChatInterface() {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onSuccess={handleHandoverSuccess}
+        prefill={modalPrefill}
+        isAdditional={hasSubmitted}
+        persona={persona}
+        history={messages.map((m) => ({ role: m.role, content: m.content }))}
       />
     </div>
   );

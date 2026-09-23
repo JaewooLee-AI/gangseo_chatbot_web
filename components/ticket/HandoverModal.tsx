@@ -1,34 +1,80 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useSpeechToText } from "@/hooks/useSpeechToText";
 import STTButton from "../chat/STTButton";
+import type { HandoverPrefill } from "@/lib/handover";
+import { ADDITIONAL_BUTTON_LABEL, HANDOVER_BUTTON_LABEL } from "@/lib/handover";
+
+export interface HandoverResult {
+  receiptNo: string;
+  phone: string;
+  summary: string;
+  isAdditional: boolean;
+}
 
 interface HandoverModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (result: HandoverResult) => void;
+  // 모달을 연 답변(또는 사용자 문장)에서 가져온 미리 채울 값.
+  prefill?: HandoverPrefill | null;
+  // 이번 대화에서 이미 접수했으면 "추가 내용" 모드로 연다(중복 접수 방지 안내).
+  isAdditional?: boolean;
+  // 담당자가 맥락을 알 수 있도록 접수와 함께 보내는 문의 유형과 최근 대화.
+  persona?: string | null;
+  history?: Array<{ role: string; content: string }>;
 }
 
 export default function HandoverModal({
   isOpen,
   onClose,
   onSuccess,
+  prefill,
+  isAdditional = false,
+  persona = null,
+  history = [],
 }: HandoverModalProps) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [reason, setReason] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // 음성 입력을 시작한 시점의 입력 내용. 음성 인식 결과(transcript)는 매번 처음부터 다시
+  // 만들어지므로, 그대로 넣으면 미리 채운 접수 양식이 통째로 지워진다. 그 뒤에 이어 붙인다.
+  const speechBaseRef = useRef("");
 
   const { isListening, transcript, startListening, stopListening, setTranscript } =
     useSpeechToText();
 
-  // Sync transcript from STT into the textarea
+  // 열릴 때마다 미리 채울 값을 반영한다. 성함·연락처는 추가 접수 때 다시 적지 않도록
+  // 이전 입력을 유지하고, 비어 있을 때만 채운다. 문의 내용은 매번 새로 시작한다.
+  useEffect(() => {
+    if (!isOpen) return;
+    setReason(prefill?.message ?? "");
+    setTranscript("");
+    speechBaseRef.current = "";
+    if (prefill?.phone) {
+      setPhone((prev) => prev || prefill.phone!);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  // Sync transcript from STT into the textarea (음성 입력 시작 전 내용 뒤에 이어 붙임)
   useEffect(() => {
     if (transcript) {
-      setReason(transcript);
+      const base = speechBaseRef.current;
+      setReason(base ? `${base}${base.endsWith("\n") ? "" : " "}${transcript}` : transcript);
     }
   }, [transcript]);
+
+  const handleToggleSpeech = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      speechBaseRef.current = reason;
+      startListening();
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,12 +89,27 @@ export default function HandoverModal({
       const response = await fetch("/api/tickets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, phone, message: reason }),
+        body: JSON.stringify({
+          name,
+          phone,
+          message: reason,
+          persona,
+          history,
+          isAdditional,
+        }),
       });
 
       if (response.ok) {
-        alert("접수되었습니다. 담당자가 확인 후 신속히 연락드리겠습니다.");
-        onSuccess();
+        // 성공 안내는 alert 대신 대화창 안의 확인 카드로 보여준다(ChatInterface).
+        // alert는 닫으면 사라져, 접수번호나 연락받을 번호를 다시 확인할 수 없다.
+        const data = await response.json();
+        setReason("");
+        onSuccess({
+          receiptNo: data.receiptNo,
+          phone: phone.trim(),
+          summary: data.summary ?? "",
+          isAdditional,
+        });
       } else {
         alert("접수 중 서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
       }
@@ -107,10 +168,12 @@ export default function HandoverModal({
 
           <header className="mb-6 border-b ghost-border pb-4 pr-8">
             <h2 className="font-headline-md text-headline-md text-deep-umber mb-2 font-bold">
-              담당자에게 메시지 남기기
+              {isAdditional ? ADDITIONAL_BUTTON_LABEL : HANDOVER_BUTTON_LABEL}
             </h2>
             <p className="font-body-sm text-body-sm text-outline leading-relaxed">
-              정확한 확인을 위해 내용과 연락처를 남겨주시면, 신속히 연락드리겠습니다.
+              {isAdditional
+                ? "이미 접수하신 내용은 담당자에게 전달되었습니다. 추가로 전하실 내용만 적어주세요."
+                : "정확한 확인을 위해 내용과 연락처를 남겨주시면, 신속히 연락드리겠습니다."}
             </p>
           </header>
 
@@ -168,18 +231,17 @@ export default function HandoverModal({
                   <STTButton
                     variant="full"
                     isListening={isListening}
-                    onToggle={isListening ? stopListening : startListening}
+                    onToggle={handleToggleSpeech}
                   />
                 </div>
                 <textarea
                   id="message"
-                  rows={4}
+                  rows={6}
                   className="w-full bg-transparent border border-ui-stone rounded-lg px-4 py-3 font-body-md text-body-md text-deep-umber focus:outline-none focus:border-deep-umber transition-colors resize-none placeholder-outline"
                   placeholder="문의하실 내용을 자세히 적어주세요..."
                   value={reason}
                   onChange={(e) => {
                     setReason(e.target.value);
-                    setTranscript(e.target.value);
                   }}
                   required
                 />

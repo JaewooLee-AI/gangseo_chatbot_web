@@ -2,8 +2,8 @@ import { supabase } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
   applyTone,
+  buildIntakePrefill,
   checkGuardrailBlock,
-  classifyInquiry,
   COMMON_CATEGORY,
   CONTEXT_THRESHOLD,
   cosineSimilarity,
@@ -15,7 +15,6 @@ import {
   FAILURE_TYPE_NO_MATCH,
   generateChatAnswer,
   generateEmbedding,
-  generateInquirySummary,
   getGeminiApiKey,
   HITL_CACHE_THRESHOLD,
   isNoAnswerResponse,
@@ -28,6 +27,13 @@ import {
   type BotSettings,
   type ChatHistoryMessage,
 } from "@/lib/rag";
+import {
+  HANDOVER_HEADER,
+  HANDOVER_PREFILL_MESSAGE_HEADER,
+  HANDOVER_PREFILL_PHONE_HEADER,
+  handoverButtonLabel,
+  type HandoverPrefill,
+} from "@/lib/handover";
 
 const DEFAULT_SETTINGS: BotSettings = {
   tone: "친절한 상담원",
@@ -37,7 +43,13 @@ const DEFAULT_SETTINGS: BotSettings = {
   strictness_level: 5,
 };
 
-const HANDOVER_HINT = "**[📞 담당자에게 메시지 남기기]** 버튼을 눌러 접수해 주십시오.";
+const NO_CONTACT = "연락처 미기재 (원문 확인 필요)";
+
+// 이 문구가 붙는 응답에는 항상 handover 신호도 함께 보내, 말풍선 바로 아래에 같은 이름의
+// 버튼이 뜨게 한다("아래"가 가리키는 대상이 실제로 존재해야 한다).
+function handoverHint(handedOver: boolean) {
+  return `아래 **[${handoverButtonLabel(handedOver)}]** 버튼을 눌러 접수해 주십시오.`;
+}
 
 // docType: A_사실(답변할 지식) / B_접수(직원이 받아적을 수집 필드 명세)
 // verification: 원본확인 / 고객확인필요(아직 센터 확인을 못 받은 임시 값)
@@ -113,7 +125,9 @@ async function hybridSearch(
   return { vectorMatches, keywordMatches: [] };
 }
 
-function streamPlainText(text: string) {
+// handover를 주면 클라이언트가 이 답변 말풍선 아래에 접수 버튼을 띄우고, 모달을 열 때
+// prefill 값을 미리 채운다(lib/handover.ts의 헤더 설명 참고).
+function streamPlainText(text: string, handover?: HandoverPrefill) {
   const encoder = new TextEncoder();
   const words = text.split(" ");
   const stream = new ReadableStream({
@@ -125,72 +139,61 @@ function streamPlainText(text: string) {
       controller.close();
     },
   });
-  return new Response(stream, {
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
-  });
+  const headers: Record<string, string> = { "Content-Type": "text/plain; charset=utf-8" };
+  if (handover) {
+    headers[HANDOVER_HEADER] = "1";
+    if (handover.message) {
+      headers[HANDOVER_PREFILL_MESSAGE_HEADER] = encodeURIComponent(handover.message);
+    }
+    if (handover.phone) {
+      headers[HANDOVER_PREFILL_PHONE_HEADER] = encodeURIComponent(handover.phone);
+    }
+  }
+  return new Response(stream, { headers });
 }
 
 export async function POST(req: Request) {
   try {
-    const { messages, persona } = await req.json();
+    const { messages, persona, handedOver: handedOverRaw } = await req.json();
     const prompt: string = messages?.[messages.length - 1]?.content ?? "";
     const history: ChatHistoryMessage[] = Array.isArray(messages) ? messages.slice(0, -1) : [];
     // 진입 화면에서 선택한 문의 유형. 미선택(또는 알 수 없는 값)이면 전체 검색.
     const personaCategories: string[] | null =
       (typeof persona === "string" && PERSONA_CATEGORIES[persona]) || null;
+    // 이번 대화에서 이미 모달로 접수를 마쳤는지. 접수 뒤에도 대화는 계속되며, 이 값으로
+    // 안내 문구를 "새 접수"가 아니라 "추가 내용"으로 바꾼다.
+    const handedOver = handedOverRaw === true;
+    const HANDOVER_HINT = handoverHint(handedOver);
 
     if (!prompt.trim()) {
       return streamPlainText("문의 내용을 입력해 주세요.");
     }
 
-    // 1. Explicit handover intent — route to counselor_inquiries immediately.
+    // 1. 담당자 연결 의도 — 접수는 "담당자에게 메시지 남기기" 모달로만 받는다.
+    // 예전에는 여기서 연락처가 보이면 바로 counselor_inquiries에 적재했는데, 그 경로는
+    // 성함을 받지 않았고 저장 실패를 확인하지 않아 실패해도 "접수 완료"라고 안내했다.
+    // 이제는 모달을 띄우고, 사용자가 쓴 문장과 연락처를 모달에 미리 채워 다시 적지 않게 한다.
     if (wantsHuman(prompt)) {
-      const { name, contact, summary: fallbackSummary } = extractContactAndSummary(prompt);
+      const { contact } = extractContactAndSummary(prompt);
+      const hasContact = contact !== NO_CONTACT;
 
-      if (contact !== "연락처 미기재 (원문 확인 필요)") {
-        const category = classifyInquiry(prompt);
-
-        // Fallback if the LLM call is unavailable/fails — same naive slice as before.
-        let summary = fallbackSummary;
-        const geminiKeyForSummary = await getGeminiApiKey(supabaseAdmin);
-        if (geminiKeyForSummary) {
-          const { data: providerRows } = await supabaseAdmin
-            .from("llm_providers")
-            .select("model_name")
-            .eq("vendor_id", "gemini");
-          const geminiModel = providerRows?.[0]?.model_name || "gemini-3.1-flash-lite";
-          const aiSummary = await generateInquirySummary(prompt, geminiKeyForSummary, geminiModel);
-          if (aiSummary) summary = aiSummary;
-        }
-
-        // No .select() chain — anon can INSERT into counselor_inquiries but
-        // cannot SELECT it back, so a return=representation read would fail.
-        await supabase.from("counselor_inquiries").insert({
-          user_name: name,
-          contact_info: contact,
-          inquiry_summary: summary,
-          raw_message: prompt,
-          input_type: "text",
-          category,
+      // 연락처가 없는 요청은 질문 자체가 유실되지 않도록 fallback_logs에 남긴다.
+      // 연락처가 있는 문장은 개인정보가 로그에 쌓이지 않도록 남기지 않는다(모달로 접수됨).
+      if (!hasContact) {
+        await supabase.from("fallback_logs").insert({
+          user_query: prompt,
           status: "pending",
+          failure_type: FAILURE_TYPE_HUMAN_REQUESTED,
         });
-
-        return streamPlainText(
-          `📞 **[담당자 접수 완료]**\n입력하신 문장에서 연락처(${contact})가 감지되어 담당자에게 즉시 전달되었습니다.\n- 요약: ${summary}\n\n실무 담당자가 확인 후 빠른 시일 내에 연락드리겠습니다. 추가 문의가 있으시면 편하게 남겨주세요!`
-        );
       }
 
-      // 연락처가 없어 counselor_inquiries에는 적재할 수 없지만, 질문 자체가 유실되지
-      // 않도록 fallback_logs에라도 남겨 관리자가 검토할 수 있게 한다.
-      await supabase.from("fallback_logs").insert({
-        user_query: prompt,
-        status: "pending",
-        failure_type: FAILURE_TYPE_HUMAN_REQUESTED,
+      const text = handedOver
+        ? `이미 이번 대화에서 담당자에게 접수해 주셨습니다. 담당자가 확인 후 남겨주신 번호로 연락드릴 예정입니다.\n추가로 전하실 내용이 있으시면 ${HANDOVER_HINT}`
+        : `담당자에게 연결해 드릴게요. 성함과 연락처, 문의 내용을 남겨주시면 담당자가 확인 후 연락드립니다.\n${HANDOVER_HINT}`;
+      return streamPlainText(text, {
+        message: prompt,
+        phone: hasContact ? contact : undefined,
       });
-
-      return streamPlainText(
-        "불편을 드려 죄송합니다. 담당자가 확인 후 연락드릴 수 있도록 성함과 연락처(예: 010-XXXX-XXXX)를 함께 남겨주시거나, 상단의 [📞 담당자에게 메시지 남기기] 버튼을 이용해 주세요."
-      );
     }
 
     // 2. Load dynamic bot settings (public read).
@@ -223,7 +226,7 @@ export async function POST(req: Request) {
         `🚨 **[Fallback 발동]** ${blockReason}\n상세한 안내는 보건소나 센터로 직접 문의 부탁드리며, ${HANDOVER_HINT}`,
         settings.tone
       );
-      return streamPlainText(response);
+      return streamPlainText(response, {});
     }
 
     if (!geminiKey) {
@@ -231,7 +234,8 @@ export async function POST(req: Request) {
         applyTone(
           `🚨 현재 AI 상담 엔진 연결에 문제가 있습니다. ${HANDOVER_HINT}`,
           settings.tone
-        )
+        ),
+        {}
       );
     }
 
@@ -241,7 +245,8 @@ export async function POST(req: Request) {
         applyTone(
           `🚨 현재 AI 상담 엔진 연결에 문제가 있습니다. ${HANDOVER_HINT}`,
           settings.tone
-        )
+        ),
+        {}
       );
     }
 
@@ -313,7 +318,8 @@ export async function POST(req: Request) {
         applyTone(
           `🚨 **[상담사 연결 권장]** 현재 엄격도 설정 기준(유사도 ${threshold.toFixed(2)} 이상)을 충족하는 지식베이스 정보를 찾지 못했습니다.\n${HANDOVER_HINT}`,
           settings.tone
-        )
+        ),
+        {}
       );
     }
 
@@ -383,15 +389,25 @@ export async function POST(req: Request) {
     // 있으므로, 이미 맥락이 풀린 독립형 질문으로 답변을 생성해야 자연스럽다.
     // 컨텍스트에 접수 폼 명세(B_접수)나 미검증 내용이 섞였는지 알려, 답변 톤을
     // 각각 "접수 안내" / "확인 필요" 로 조정하게 한다.
+    // 접수 폼 명세(B_접수)가 컨텍스트에 있으면 답변이 "버튼으로 남겨 달라"는 안내가 되므로,
+    // 그 말풍선 아래에 실제 버튼을 띄운다. 모달에는 가장 상위로 검색된 B_접수 항목의
+    // 필요 정보를 양식으로 미리 채운다(topMatches는 벡터 유사도순 → 키워드 후보순).
+    const intakeRow = topMatches.find((m) => m.docType === "B_접수");
+    const intakeHandover: HandoverPrefill | undefined = intakeRow
+      ? { message: buildIntakePrefill(intakeRow.content) }
+      : undefined;
+
     const llmAnswer = await generateChatAnswer(
       normalizedPrompt, contextChunks, settings.tone, geminiKey, geminiModel,
       {
-        hasIntake: topMatches.some((m) => m.docType === "B_접수"),
+        hasIntake: !!intakeRow,
         hasUnverified: topMatches.some((m) => m.verification === "고객확인필요"),
+        handedOver,
       }
     );
 
     let response: string;
+    let responseHandover: HandoverPrefill | undefined = intakeHandover;
     if (llmAnswer && isNoAnswerResponse(llmAnswer)) {
       // Passed the similarity threshold but the LLM itself says it can't
       // answer from the retrieved context — flag for human review instead
@@ -402,6 +418,7 @@ export async function POST(req: Request) {
         failure_type: FAILURE_TYPE_LOW_CONFIDENCE,
       });
       response = `${llmAnswer}\n\n🚨 **[상담사 연결 권장]** 지식베이스에서 확실한 근거를 찾지 못해 관리자 검토 목록에 등록했습니다. 빠른 확인이 필요하시면 ${HANDOVER_HINT}`;
+      responseHandover = intakeHandover ?? {};
     } else if (llmAnswer) {
       // 키워드 매칭 값은 트라이그램 유사도라 코사인 임계치와 스케일이 달라 나란히
       // 표기하면 오해를 줄 수 있으므로, 벡터 게이트 통과 여부에 따라 출처 표기를 분리한다.
@@ -417,7 +434,7 @@ export async function POST(req: Request) {
         : `${top.content}\n\n**[출처]:** [${top.category}] (키워드 검색 매칭 · 벡터 유사도 기준 미달)`;
     }
 
-    return streamPlainText(applyTone(response, settings.tone));
+    return streamPlainText(applyTone(response, settings.tone), responseHandover);
   } catch (error) {
     console.error("Chat route error:", error);
     return new Response(
