@@ -5,30 +5,43 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // modules/06_simulator.py — keep these two files in sync when the admin
 // side's guardrail/threshold/prompt logic changes.
 
-// get_llm_api_key RPC(Supabase Vault 조회)가 Cloudflare Workers 환경에서 간헐적으로
-// 에러 없이 빈 값을 반환하는 현상이 관찰됐다(실측: 몇 초 간격의 재요청 중 한 번만
-// 실패). 원인 진단을 위해 에러를 반드시 로그로 남기고, 일시적 네트워크 문제일
-// 가능성이 높으므로 한 번 재시도한다.
+// Cloudflare Workers execute at whichever edge PoP is closest to the end
+// user, which varies per request. Google's Gemini API blocks some
+// geographies ("User location is not supported for the API use"), so calls
+// made directly from a Worker fail intermittently depending on which PoP
+// handled that particular request (실측: 같은 질문이 성공/실패를 반복,
+// wrangler tail로 "FAILED_PRECONDITION" 확인, 2026-09-23). Routing through
+// this small Cloud Run relay (always the same region, Google-to-Google
+// traffic) avoids the restriction entirely — verified via 15/15 and 10/10
+// stress tests against the embedContent/generateContent endpoints.
+//
+// The relay renames the API key header because Cloud Run's front-end proxy
+// strips inbound "x-goog-*" headers (reserved for Google infra use).
+const GEMINI_UPSTREAM_BASE =
+  process.env.GEMINI_RELAY_URL ||
+  "https://gemini-relay-645651316015.asia-northeast3.run.app";
+
+function geminiFetch(path: string, apiKey: string, body: unknown) {
+  return fetch(`${GEMINI_UPSTREAM_BASE}${path}`, {
+    method: "POST",
+    headers: { "x-relay-api-key": apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+// get_llm_api_key RPC(Supabase Vault 조회) 호출 실패를 조용히 삼키지 않고
+// 로그로 남기며, 일시적 네트워크 문제에 대비해 한 번 재시도한다.
 export async function getGeminiApiKey(
   supabaseAdmin: SupabaseClient
 ): Promise<string | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await supabaseAdmin.rpc("get_llm_api_key", {
+    const { data, error } = await supabaseAdmin.rpc("get_llm_api_key", {
       p_vendor_id: "gemini",
     });
-    // TEMP DIAGNOSTIC: log every attempt (not just errors) to characterize an
-    // intermittent Cloudflare-Workers-only failure where both `data` and
-    // `error` come back falsy with no exception thrown — remove once root
-    // caused (see conversation 2026-09-23).
-    console.log(`get_llm_api_key RPC attempt ${attempt + 1}/2:`, {
-      hasData: !!res.data,
-      dataLength: typeof res.data === "string" ? res.data.length : null,
-      error: res.error,
-      status: res.status,
-      statusText: res.statusText,
-    });
-    if (res.data) {
-      return res.data as string;
+    if (error) {
+      console.error(`get_llm_api_key RPC error (attempt ${attempt + 1}/2):`, error);
+    } else if (data) {
+      return data as string;
     }
     if (attempt === 0) {
       await new Promise((r) => setTimeout(r, 300));
@@ -314,22 +327,12 @@ export async function generateEmbedding(
   dimension = 1536
 ): Promise<number[] | null> {
   try {
-    const res = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent",
-      {
-        method: "POST",
-        headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: { parts: [{ text }] },
-          output_dimensionality: dimension,
-        }),
-      }
+    const res = await geminiFetch(
+      "/v1beta/models/gemini-embedding-001:embedContent",
+      apiKey,
+      { content: { parts: [{ text }] }, output_dimensionality: dimension }
     );
     if (!res.ok) {
-      // TEMP DIAGNOSTIC: this call previously failed silently (return null with
-      // no trace), making an intermittent Cloudflare-Workers-only failure
-      // indistinguishable from a missing API key — remove once root caused
-      // (see conversation 2026-09-23).
       console.error("generateEmbedding failed:", res.status, res.statusText, await res.text());
       return null;
     }
@@ -354,20 +357,12 @@ async function callGeminiGenerateContent(
   }
   let res: Response;
   try {
-    res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`,
-      {
-        method: "POST",
-        headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      }
-    );
+    res = await geminiFetch(`/v1beta/models/${modelName}:generateContent`, apiKey, body);
   } catch (err) {
     console.error("callGeminiGenerateContent threw:", err);
     return null;
   }
   if (!res.ok) {
-    // TEMP DIAGNOSTIC: remove once root caused (see conversation 2026-09-23).
     console.error("callGeminiGenerateContent failed:", res.status, res.statusText, await res.text());
     return null;
   }
