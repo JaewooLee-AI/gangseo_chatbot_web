@@ -4,6 +4,7 @@ import {
   applyTone,
   checkGuardrailBlock,
   classifyInquiry,
+  COMMON_CATEGORY,
   CONTEXT_THRESHOLD,
   cosineSimilarity,
   detectAmbiguousService,
@@ -328,11 +329,42 @@ export async function POST(req: Request) {
       }
     }
 
-    const contextChunks = topMatches.map((m) => m.content);
+    // 출처 표기와 유사도 점수는 "실제로 검색되어 뽑힌" 문서만 기준으로 삼는다.
+    // 아래에서 항상 덧붙이는 공통 정보까지 출처에 넣으면 모든 답변에 0_공통이
+    // 붙어 표기가 무의미해진다.
     const sourceCategories = Array.from(new Set(topMatches.map((m) => m.category))).sort().join(", ");
+    const topScore = topMatches[0]?.sim ?? 0;
+
+    // 공통 정보(센터 주소 등)는 유사도로는 top-k 안에 못 들어오지만 "면접 장소",
+    // "방문 주소"처럼 이걸 물어보는 질문이 실제로 있다. 분량이 매우 적으므로
+    // (현재 1행) 순위와 무관하게 항상 컨텍스트에 넣어 잘려나가지 않게 한다.
+    // COMMON_CATEGORY 주석에 실측 순위가 정리되어 있다.
+    const { data: commonRows, error: commonErr } = await supabase
+      .from("rag_documents")
+      .select("content, category, doc_type, verification")
+      .eq("category", COMMON_CATEGORY);
+    if (commonErr) {
+      console.error("공통 정보(0_공통) 조회 실패:", commonErr);
+    }
+    if (commonRows?.length) {
+      const already = new Set(topMatches.map((m) => m.content));
+      for (const row of commonRows) {
+        const content = row.content as string;
+        if (already.has(content)) continue;
+        topMatches.push({
+          sim: 0,
+          content,
+          category: row.category as string,
+          docType: (row.doc_type as string) ?? "A_사실",
+          verification: (row.verification as string) ?? null,
+        });
+        already.add(content);
+      }
+    }
+
+    const contextChunks = topMatches.map((m) => m.content);
     // 진입 유형과 다른 분야에서 답을 찾았으면 사용자에게 알린다.
     const scopeNote = widened ? "\n※ 선택하신 분야에 해당 정보가 없어 다른 분야에서 안내드렸습니다." : "";
-    const topScore = topMatches[0]?.sim ?? 0;
 
     const { data: providerRows } = await supabaseAdmin
       .from("llm_providers")

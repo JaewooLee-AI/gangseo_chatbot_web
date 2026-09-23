@@ -127,6 +127,14 @@ export const CONTEXT_THRESHOLD = 0.55;
 // (이 파일은 "server-only"라 클라이언트에서 import할 수 없다).
 export { PERSONA_CATEGORIES, PERSONA_LABELS } from "./personas";
 
+// 센터 주소·대표 연락처처럼 특정 서비스 분야에 속하지 않는 공통 정보가 담긴 카테고리.
+// 모든 페르소나에 포함되지만, 질문과 겹치는 단어가 적어 유사도 경쟁에서 구조적으로
+// 밀린다(실측: "활동지원사 면접 언제 어디로 찾아가면 되나요?"에서 주소 청크가
+// 페르소나 적용 시 9위, 전체 검색에서는 후보 30건 밖 — 2026-09-23).
+// 정작 "면접 장소"·"방문 주소" 같은 질문의 답이 여기 있어서, top-k 컷에 잘리면
+// 답변에서 장소만 통째로 빠진다.
+export const COMMON_CATEGORY = "0_공통";
+
 // 카테고리(v4 엑셀 시트명)를 상위 서비스 그룹으로 매핑한다. "0_공통"은 어느 서비스에도
 // 속하지 않는 공통 지식(센터 주소 등)이라 판단 재료에서 제외한다.
 export function inferServiceGroup(category: string): "활동지원" | "가사" | null {
