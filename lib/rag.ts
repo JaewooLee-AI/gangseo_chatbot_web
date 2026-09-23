@@ -313,21 +313,33 @@ export async function generateEmbedding(
   apiKey: string,
   dimension = 1536
 ): Promise<number[] | null> {
-  const res = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent",
-    {
-      method: "POST",
-      headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        content: { parts: [{ text }] },
-        output_dimensionality: dimension,
-      }),
+  try {
+    const res = await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent",
+      {
+        method: "POST",
+        headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: { parts: [{ text }] },
+          output_dimensionality: dimension,
+        }),
+      }
+    );
+    if (!res.ok) {
+      // TEMP DIAGNOSTIC: this call previously failed silently (return null with
+      // no trace), making an intermittent Cloudflare-Workers-only failure
+      // indistinguishable from a missing API key — remove once root caused
+      // (see conversation 2026-09-23).
+      console.error("generateEmbedding failed:", res.status, res.statusText, await res.text());
+      return null;
     }
-  );
-  if (!res.ok) return null;
-  const data = await res.json();
-  const emb = data.embedding ?? data.embeddings?.[0];
-  return emb?.values ?? emb?.value ?? null;
+    const data = await res.json();
+    const emb = data.embedding ?? data.embeddings?.[0];
+    return emb?.values ?? emb?.value ?? null;
+  } catch (err) {
+    console.error("generateEmbedding threw:", err);
+    return null;
+  }
 }
 
 async function callGeminiGenerateContent(
@@ -340,15 +352,25 @@ async function callGeminiGenerateContent(
   if (temperature !== undefined) {
     body.generationConfig = { temperature };
   }
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`,
-    {
-      method: "POST",
-      headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }
-  );
-  if (!res.ok) return null;
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`,
+      {
+        method: "POST",
+        headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }
+    );
+  } catch (err) {
+    console.error("callGeminiGenerateContent threw:", err);
+    return null;
+  }
+  if (!res.ok) {
+    // TEMP DIAGNOSTIC: remove once root caused (see conversation 2026-09-23).
+    console.error("callGeminiGenerateContent failed:", res.status, res.statusText, await res.text());
+    return null;
+  }
   const data = await res.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   return text ? text.trim() : null;
