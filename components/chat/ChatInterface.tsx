@@ -54,9 +54,12 @@ export default function ChatInterface() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  // isPickerOpen도 함께 본다: "문의 유형 바꾸기" 버튼은 화면 하단에 고정되어 있는데
+  // 선택 카드는 대화 영역 끝에 렌더되므로, 위로 스크롤한 상태에서 누르면 카드가 보이지
+  // 않는다. 열릴 때 그 위치로 스크롤해 준다.
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isLoading]);
+  }, [messages, isLoading, isPickerOpen]);
 
   // 응답이 끝나 입력란이 다시 활성화된 시점에 포커스를 복구한다. disabled가 풀린 뒤에
   // 실행되어야 focus()가 먹으므로, 전송 핸들러 안이 아니라 렌더 후 effect에서 처리한다.
@@ -286,21 +289,6 @@ export default function ChatInterface() {
             </div>
           )}
 
-          {/* 선택한 유형 표시 및 변경 */}
-          {persona && !isPickerOpen && (
-            <div className="flex items-center gap-2 self-start">
-              <span className="px-3 py-1.5 rounded-full bg-ui-sand text-deep-umber ghost-border font-label-md text-label-md">
-                {PERSONA_LABELS[persona]}
-              </span>
-              <button
-                onClick={() => setIsPickerOpen(true)}
-                className="font-label-md text-label-md text-outline underline hover:text-deep-umber transition-colors"
-              >
-                변경
-              </button>
-            </div>
-          )}
-
           {isLoading && (
             <div className="flex gap-4 items-start w-full">
               <div className="flex-shrink-0 w-10 h-10 rounded-full bg-ui-sand flex items-center justify-center ghost-border">
@@ -345,6 +333,27 @@ export default function ChatInterface() {
       {/* Floating / Sticky Chat Input Area */}
       <div className="fixed bottom-[56px] md:bottom-0 left-0 w-full bg-canvas-ivory/95 backdrop-blur-md border-t ghost-border px-4 md:px-8 py-3 z-40">
         <div className="max-w-4xl mx-auto relative">
+          {/* 선택한 문의 유형과 변경 버튼. 대화 흐름 안에 두면 메시지에 섞여 묻히므로
+              입력창 바로 위에 고정해 항상 같은 자리에서 보이게 한다. 이전에는 칩 옆의
+              작은 회색 밑줄 "변경"이었는데, 만든 사람조차 못 찾을 만큼 눈에 띄지
+              않았다(주 이용자가 어르신이라 더 불리하다). */}
+          {persona && !isPickerOpen && (
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <span className="px-3 py-1.5 rounded-full bg-ui-sand text-deep-umber ghost-border font-label-lg text-label-lg">
+                {PERSONA_LABELS[persona]}
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsPickerOpen(true)}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-deep-umber/40 bg-canvas-ivory text-deep-umber hover:bg-deep-umber hover:text-canvas-ivory transition-colors font-label-lg text-label-lg"
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: "18px" }}>
+                  swap_horiz
+                </span>
+                문의 유형 바꾸기
+              </button>
+            </div>
+          )}
           <div className="relative flex items-center bg-canvas-ivory border border-ui-stone focus-within:border-deep-umber rounded-xl p-1 transition-colors ambient-shadow">
             <STTButton
               isListening={isListening}
