@@ -30,6 +30,13 @@ export default function ChatInterface() {
   const [draftService, setDraftService] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  // 메시지를 보낸 뒤에만 입력란으로 포커스를 되돌리기 위한 플래그.
+  // 입력란은 응답을 기다리는 동안 disabled가 되는데, 브라우저는 요소가 disabled되면
+  // 포커스를 해제한다. 그래서 답변이 끝나도 커서가 사라져 매번 마우스로 입력란을 다시
+  // 클릭해야 하는 불편이 있었다. 최초 진입 시에는 포커스하지 않는다 — 모바일에서
+  // 가상 키보드가 바로 올라와 대화 화면을 가리기 때문(주 이용자가 어르신이라 특히 중요).
+  const shouldRefocusRef = useRef(false);
 
   // Web Speech API hook
   const { isListening, transcript, startListening, stopListening, setTranscript } =
@@ -50,6 +57,15 @@ export default function ChatInterface() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isLoading]);
+
+  // 응답이 끝나 입력란이 다시 활성화된 시점에 포커스를 복구한다. disabled가 풀린 뒤에
+  // 실행되어야 focus()가 먹으므로, 전송 핸들러 안이 아니라 렌더 후 effect에서 처리한다.
+  useEffect(() => {
+    if (!isLoading && !isChatLocked && shouldRefocusRef.current) {
+      shouldRefocusRef.current = false;
+      inputRef.current?.focus();
+    }
+  }, [isLoading, isChatLocked]);
 
   const handleOpenHandover = () => {
     setIsModalOpen(true);
@@ -82,6 +98,7 @@ export default function ChatInterface() {
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setTranscript("");
+    shouldRefocusRef.current = true;
     // 유형을 고르지 않고 바로 질문한 경우에도 선택 카드는 접는다(대화 화면을 가리지 않도록).
     setIsPickerOpen(false);
     if (isListening) stopListening();
@@ -335,6 +352,7 @@ export default function ChatInterface() {
             />
             <form onSubmit={handleSubmit} className="flex-1 flex items-center">
               <input
+                ref={inputRef}
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
