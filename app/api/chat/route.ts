@@ -22,6 +22,7 @@ import {
   normalizeQuery,
   parseEmbedding,
   PERSONA_CATEGORIES,
+  PERSONA_LABELS,
   STRICTNESS_THRESHOLD,
   wantsHuman,
   type BotSettings,
@@ -206,7 +207,13 @@ export async function POST(req: Request) {
     // 4. 질의 정규화: 오탈자 교정 + 축약된 단문을 완전한 문장으로 보완하고, 이전 대화를
     // 참고해 "그럼 2구간은요?" 같은 생략형 후속 질문을 독립적인 질문으로 풀어쓴다.
     // 키가 없거나 호출이 실패하면 원문이 그대로 반환되므로 안전하다.
-    const normalizedPrompt = geminiKey ? await normalizeQuery(prompt, geminiKey, history) : prompt;
+    // 선택한 문의 유형을 함께 넘긴다. "자격은?" 같은 단문을 어느 방향으로 풀지가
+    // 이 값에 달려 있다(normalizeQuery 주석의 실측 사례 참고).
+    const personaLabel =
+      typeof persona === "string" ? PERSONA_LABELS[persona] ?? null : null;
+    const normalizedPrompt = geminiKey
+      ? await normalizeQuery(prompt, geminiKey, history, undefined, personaLabel)
+      : prompt;
 
     // 5. Compliance guardrail — 키워드 1차 필터 + LLM 의도 판정(2단계). 오탈자로
     // 키워드 탐지가 회피되지 않도록 원문+보정문을 함께 검사한다.
