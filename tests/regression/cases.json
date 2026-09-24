@@ -1,0 +1,1114 @@
+[
+ {
+  "id": "I1-1",
+  "intent": "가사 3시간 요금",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "가사서비스 3시간 이용 요금이 얼마인가요?",
+  "expect": [
+   [
+    "75,000",
+    "7만 5천",
+    "75000"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I1-2",
+  "intent": "가사 3시간 요금",
+  "style": "오타",
+  "persona": null,
+  "history": [],
+  "question": "가사서비스 3시간 요그미 얼마에여",
+  "expect": [
+   [
+    "75,000",
+    "7만 5천",
+    "75000"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I1-3",
+  "intent": "가사 3시간 요금",
+  "style": "띄어쓰기없음",
+  "persona": null,
+  "history": [],
+  "question": "가사서비스3시간요금얼마",
+  "expect": [
+   [
+    "75,000",
+    "7만 5천",
+    "75000"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I1-4",
+  "intent": "가사 3시간 요금",
+  "style": "단문+유형",
+  "persona": "가사_이용희망",
+  "history": [],
+  "question": "3시간은?",
+  "expect": [
+   [
+    "75,000",
+    "7만 5천",
+    "75000"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I1-5",
+  "intent": "가사 3시간 요금",
+  "style": "구어·동의어",
+  "persona": null,
+  "history": [],
+  "question": "청소 도우미 세시간 부르면 얼마예요",
+  "expect": [
+   [
+    "75,000",
+    "7만 5천",
+    "75000"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I1-6",
+  "intent": "가사 3시간 요금",
+  "style": "음성(STT)",
+  "persona": null,
+  "history": [],
+  "question": "음 그 저기 집에 청소해 주는 거 세 시간 하면 돈이 얼마나 드나 해서요",
+  "expect": [
+   [
+    "75,000",
+    "7만 5천",
+    "75000"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I2-1",
+  "intent": "활동지원사 면접",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "활동지원사 면접은 언제 보나요?",
+  "expect": [
+   [
+    "화요일"
+   ],
+   [
+    "14시",
+    "오후 2시",
+    "2시"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I2-2",
+  "intent": "활동지원사 면접",
+  "style": "오타",
+  "persona": null,
+  "history": [],
+  "question": "활동지원사 면졉 언제에요",
+  "expect": [
+   [
+    "화요일"
+   ],
+   [
+    "14시",
+    "오후 2시",
+    "2시"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I2-3",
+  "intent": "활동지원사 면접",
+  "style": "단문+유형",
+  "persona": "활동지원_취업희망",
+  "history": [],
+  "question": "면접은?",
+  "expect": [
+   [
+    "화요일"
+   ],
+   [
+    "14시",
+    "오후 2시",
+    "2시"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I2-4",
+  "intent": "활동지원사 면접",
+  "style": "구어·줄임말",
+  "persona": null,
+  "history": [],
+  "question": "활보 일하고 싶은데 면접 언제 가면 돼요",
+  "expect": [
+   [
+    "화요일"
+   ],
+   [
+    "14시",
+    "오후 2시",
+    "2시"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I3-1",
+  "intent": "센터 주소",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "센터 주소 알려주세요",
+  "expect": [
+   [
+    "우장산로"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I3-2",
+  "intent": "센터 주소",
+  "style": "오타",
+  "persona": null,
+  "history": [],
+  "question": "쎈터 위치가 어디에여",
+  "expect": [
+   [
+    "우장산로"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I3-3",
+  "intent": "센터 주소",
+  "style": "단문+유형",
+  "persona": "활동지원_취업희망",
+  "history": [],
+  "question": "어디로 가요?",
+  "expect": [
+   [
+    "우장산로"
+   ]
+  ],
+  "kind": "answer",
+  "allowGap": true
+ },
+ {
+  "id": "I3-4",
+  "intent": "센터 주소",
+  "style": "띄어쓰기없음",
+  "persona": null,
+  "history": [],
+  "question": "센터가어디있어요",
+  "expect": [
+   [
+    "우장산로"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I4-1",
+  "intent": "활동지원사 자격",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "활동지원사 하려면 자격증 필요해요?",
+  "expect": [
+   [
+    "이수증"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I4-2",
+  "intent": "활동지원사 자격",
+  "style": "단문+유형",
+  "persona": "활동지원_취업희망",
+  "history": [],
+  "question": "자격은?",
+  "expect": [
+   [
+    "이수증"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I4-3",
+  "intent": "활동지원사 자격",
+  "style": "오타",
+  "persona": null,
+  "history": [],
+  "question": "활동지원사 자겨 요건",
+  "expect": [
+   [
+    "이수증"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I4-4",
+  "intent": "활동지원사 자격",
+  "style": "구어+유형",
+  "persona": "활동지원_취업희망",
+  "history": [],
+  "question": "자격증 없어도 되나요",
+  "expect": [
+   [
+    "이수증"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I5-1",
+  "intent": "가사관리사 자격",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "가사관리사가 되려면 자격증이 있어야 하나요?",
+  "expect": [
+   [
+    "자격증은 없",
+    "자격증은 따로 없",
+    "따로 없",
+    "필요하지 않",
+    "없습니다",
+    "없으며",
+    "없어도",
+    "없답니다"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I5-2",
+  "intent": "가사관리사 자격",
+  "style": "단문+유형",
+  "persona": "가사_취업희망",
+  "history": [],
+  "question": "자격증 필요?",
+  "expect": [
+   [
+    "자격증은 없",
+    "자격증은 따로 없",
+    "따로 없",
+    "필요하지 않",
+    "없습니다",
+    "없으며",
+    "없어도",
+    "없답니다"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I5-3",
+  "intent": "가사관리사 자격",
+  "style": "띄어쓰기·오타",
+  "persona": null,
+  "history": [],
+  "question": "가사관리사자격증없어도되요?",
+  "expect": [
+   [
+    "자격증은 없",
+    "자격증은 따로 없",
+    "따로 없",
+    "필요하지 않",
+    "없습니다",
+    "없으며",
+    "없어도",
+    "없답니다"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I6-1",
+  "intent": "활동지원 입사서류",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "활동지원사 입사할 때 필요한 서류가 뭐예요?",
+  "expect": [
+   [
+    "이수증"
+   ],
+   [
+    "통장"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I6-2",
+  "intent": "활동지원 입사서류",
+  "style": "단문+유형",
+  "persona": "활동지원_취업희망",
+  "history": [],
+  "question": "서류 뭐 챙겨가요?",
+  "expect": [
+   [
+    "이수증"
+   ],
+   [
+    "통장"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I6-3",
+  "intent": "활동지원 입사서류",
+  "style": "오타+유형",
+  "persona": "활동지원_취업희망",
+  "history": [],
+  "question": "입사서류머에요",
+  "expect": [
+   [
+    "이수증"
+   ],
+   [
+    "통장"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I7-1",
+  "intent": "수급자 본인부담금",
+  "style": "정상+유형",
+  "persona": "활동지원_이용희망",
+  "history": [],
+  "question": "기초수급자는 본인부담금이 얼마예요?",
+  "expect": [
+   [
+    "면제"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I7-2",
+  "intent": "수급자 본인부담금",
+  "style": "구어+유형",
+  "persona": "활동지원_이용중",
+  "history": [],
+  "question": "수급자는 돈 내나요?",
+  "expect": [
+   [
+    "면제"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I7-3",
+  "intent": "수급자 본인부담금",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "기초생활수급자 본인부담금",
+  "expect": [
+   [
+    "면제"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I8-1",
+  "intent": "가사 결제방식",
+  "style": "단문+유형",
+  "persona": "가사_이용희망",
+  "history": [],
+  "question": "결제는 어떻게 해요?",
+  "expect": [
+   [
+    "선결제"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I8-2",
+  "intent": "가사 결제방식",
+  "style": "오타(결재)",
+  "persona": null,
+  "history": [],
+  "question": "가사서비스 결재 방법",
+  "expect": [
+   [
+    "선결제"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I8-3",
+  "intent": "가사 결제방식",
+  "style": "구어+유형",
+  "persona": "가사_이용희망",
+  "history": [],
+  "question": "카드로 계산하나요",
+  "expect": [
+   [
+    "선결제",
+    "결제창"
+   ]
+  ],
+  "kind": "answer",
+  "allowGap": true
+ },
+ {
+  "id": "I9-1",
+  "intent": "주말 추가요금",
+  "style": "정상+유형",
+  "persona": "가사_이용희망",
+  "history": [],
+  "question": "주말에 이용하면 추가요금 있어요?",
+  "expect": [
+   [
+    "20,000",
+    "2만"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I9-2",
+  "intent": "주말 추가요금",
+  "style": "구어+유형",
+  "persona": "가사_이용희망",
+  "history": [],
+  "question": "토요일에도 돼요? 돈 더 내요?",
+  "expect": [
+   [
+    "20,000",
+    "2만"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I10-1",
+  "intent": "교육기관",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "강서구 활동지원사 교육은 어디서 받아요?",
+  "expect": [
+   [
+    "8844",
+    "길라"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I10-2",
+  "intent": "교육기관",
+  "style": "단문+유형",
+  "persona": "활동지원_취업희망",
+  "history": [],
+  "question": "교육 어디서 받아요",
+  "expect": [
+   [
+    "8844",
+    "2069",
+    "2694",
+    "7045",
+    "129"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I10-3",
+  "intent": "교육기관",
+  "style": "띄어쓰기없음",
+  "persona": null,
+  "history": [],
+  "question": "양천구교육기관",
+  "expect": [
+   [
+    "0027",
+    "굿월드"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I11-1",
+  "intent": "재직서류",
+  "style": "정상+유형",
+  "persona": "활동지원_재직중",
+  "history": [],
+  "question": "재직증명서 어떻게 받아요?",
+  "expect": [
+   [
+    "카톡",
+    "팩스",
+    "직접"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I11-2",
+  "intent": "재직서류",
+  "style": "구어+유형",
+  "persona": "활동지원_재직중",
+  "history": [],
+  "question": "경력증명서 떼고 싶어요",
+  "expect": [
+   [
+    "카톡",
+    "팩스",
+    "직접"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I12-1",
+  "intent": "노쇼",
+  "style": "구어+유형",
+  "persona": "가사_이용중",
+  "history": [],
+  "question": "당일에 취소하면 어떻게 돼요?",
+  "expect": [
+   [
+    "차감"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I12-2",
+  "intent": "노쇼",
+  "style": "구어+유형",
+  "persona": "가사_이용희망",
+  "history": [],
+  "question": "노쇼하면 벌금 있나요",
+  "expect": [
+   [
+    "차감"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I13-1",
+  "intent": "가사 신청방법",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "가사서비스 신청은 어떻게 해요?",
+  "expect": [
+   [
+    "housekeeping",
+    "링크"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "I13-2",
+  "intent": "가사 신청방법",
+  "style": "단문+유형",
+  "persona": "가사_이용희망",
+  "history": [],
+  "question": "신청하려면요?",
+  "expect": [
+   [
+    "housekeeping",
+    "링크"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "M1",
+  "intent": "이어지는 질문(요금)",
+  "style": "후속 단문",
+  "persona": null,
+  "history": [
+   [
+    "user",
+    "가사서비스 3시간 얼마예요?"
+   ],
+   [
+    "assistant",
+    "가사서비스 3시간 이용 요금은 정기이용 75,000원, 일회성 85,000원입니다."
+   ]
+  ],
+  "question": "4시간은요?",
+  "expect": [
+   [
+    "100,000",
+    "10만"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "M2",
+  "intent": "이어지는 질문(장소)",
+  "style": "후속 단문",
+  "persona": null,
+  "history": [
+   [
+    "user",
+    "활동지원사 면접 언제예요?"
+   ],
+   [
+    "assistant",
+    "활동지원사 면접은 매주 화요일 14시에 진행합니다."
+   ]
+  ],
+  "question": "어디로 가요?",
+  "expect": [
+   [
+    "우장산로"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "M3",
+  "intent": "이어지는 질문(구간)",
+  "style": "후속 단문",
+  "persona": "활동지원_이용희망",
+  "history": [
+   [
+    "user",
+    "본인부담금 1구간 차상위는 얼마예요?"
+   ],
+   [
+    "assistant",
+    "1구간 차상위(정액)는 20,000원입니다."
+   ]
+  ],
+  "question": "수급권자는요?",
+  "expect": [
+   [
+    "면제"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "B1",
+  "intent": "접수(변경)",
+  "style": "정상+유형",
+  "persona": "활동지원_이용중",
+  "history": [],
+  "question": "활동지원사를 바꾸고 싶어요",
+  "expect": [],
+  "kind": "handover"
+ },
+ {
+  "id": "B2",
+  "intent": "접수(휴직)",
+  "style": "구어+유형",
+  "persona": "활동지원_재직중",
+  "history": [],
+  "question": "휴직하려면 어떻게 해요",
+  "expect": [],
+  "kind": "handover"
+ },
+ {
+  "id": "B3",
+  "intent": "접수(변경)",
+  "style": "오타",
+  "persona": null,
+  "history": [],
+  "question": "활동지원사 교채 원해요",
+  "expect": [],
+  "kind": "handover"
+ },
+ {
+  "id": "O1",
+  "intent": "지식 없음",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "센터에 주차장 있어요?",
+  "expect": [],
+  "kind": "fallback"
+ },
+ {
+  "id": "O2",
+  "intent": "지식 없음(전화번호)",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "센터 대표 전화번호가 뭐예요?",
+  "expect": [],
+  "kind": "fallback"
+ },
+ {
+  "id": "G1",
+  "intent": "가드레일 오차단",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "치매 어르신도 활동지원 받을 수 있나요?",
+  "expect": [],
+  "kind": "not_blocked"
+ },
+ {
+  "id": "G2",
+  "intent": "가드레일 오차단",
+  "style": "정상+유형",
+  "persona": "가사_취업희망",
+  "history": [],
+  "question": "근로계약서는 언제 쓰나요?",
+  "expect": [],
+  "kind": "not_blocked"
+ },
+ {
+  "id": "E1",
+  "intent": "교육기관",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "교육기관 알려주세요",
+  "expect": [
+   [
+    "강서길라",
+    "8844"
+   ],
+   [
+    "해피피플",
+    "2069-2572"
+   ],
+   [
+    "굿월드",
+    "2694-0027"
+   ],
+   [
+    "785-7045",
+    "총연합회"
+   ],
+   [
+    "129"
+   ]
+  ],
+  "kind": "answer_or_clarify"
+ },
+ {
+  "id": "E2",
+  "intent": "교육기관",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "교육 기관은 어디인가요?",
+  "expect": [
+   [
+    "강서길라",
+    "8844"
+   ],
+   [
+    "해피피플",
+    "2069-2572"
+   ],
+   [
+    "굿월드",
+    "2694-0027"
+   ],
+   [
+    "785-7045",
+    "총연합회"
+   ],
+   [
+    "129"
+   ]
+  ],
+  "kind": "answer_or_clarify"
+ },
+ {
+  "id": "E3",
+  "intent": "교육기관",
+  "style": "단문+유형",
+  "persona": "활동지원_취업희망",
+  "history": [],
+  "question": "교육 어디서 받아요",
+  "expect": [
+   [
+    "강서길라",
+    "8844"
+   ],
+   [
+    "해피피플",
+    "2069-2572"
+   ],
+   [
+    "굿월드",
+    "2694-0027"
+   ],
+   [
+    "785-7045",
+    "총연합회"
+   ],
+   [
+    "129"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "E4",
+  "intent": "교육기관",
+  "style": "오타",
+  "persona": null,
+  "history": [],
+  "question": "활동지원사 교육긔관 어디에요",
+  "expect": [
+   [
+    "강서길라",
+    "8844"
+   ],
+   [
+    "해피피플",
+    "2069-2572"
+   ],
+   [
+    "굿월드",
+    "2694-0027"
+   ],
+   [
+    "785-7045",
+    "총연합회"
+   ],
+   [
+    "129"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "E5",
+  "intent": "교육기관(특정지역)",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "구로구에서 활동지원사 교육 받을 수 있는 곳",
+  "expect": [
+   [
+    "해피피플",
+    "2069-2572"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "E6",
+  "intent": "교육기관(특정지역)",
+  "style": "띄어쓰기없음",
+  "persona": null,
+  "history": [],
+  "question": "강서구교육기관",
+  "expect": [
+   [
+    "강서길라",
+    "8844"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "E7",
+  "intent": "교육기관(목록 외 지역)",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "마포구 사는데 교육은 어디서 받아요?",
+  "expect": [
+   [
+    "129"
+   ]
+  ],
+  "kind": "answer",
+  "allowGap": true
+ },
+ {
+  "id": "P1",
+  "intent": "수급권자",
+  "style": "이어지는 질문",
+  "persona": "활동지원_이용희망",
+  "history": [
+   [
+    "user",
+    "본인부담금 1구간 차상위는 얼마예요?"
+   ],
+   [
+    "assistant",
+    "1구간 차상위(정액)는 20,000원입니다."
+   ]
+  ],
+  "question": "수급권자는요?",
+  "expect": [
+   [
+    "면제"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "P2",
+  "intent": "수급권자",
+  "style": "구어+유형",
+  "persona": "활동지원_이용중",
+  "history": [],
+  "question": "수급자는 돈 내나요?",
+  "expect": [
+   [
+    "면제"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "P3",
+  "intent": "수급권자",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "기초생활수급자 본인부담금",
+  "expect": [
+   [
+    "면제"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "P4",
+  "intent": "차상위",
+  "style": "단문+유형",
+  "persona": "활동지원_이용희망",
+  "history": [],
+  "question": "차상위는?",
+  "expect": [
+   [
+    "20,000",
+    "2만"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "P5",
+  "intent": "구간×소득",
+  "style": "정상+유형",
+  "persona": "활동지원_이용희망",
+  "history": [],
+  "question": "13구간인데 중위소득 120% 이하면 본인부담금 얼마예요?",
+  "expect": [
+   [
+    "124,500"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "P6",
+  "intent": "구간×소득",
+  "style": "오타",
+  "persona": null,
+  "history": [],
+  "question": "본인부담금 15구간 중위소득180%초과 얼마에여",
+  "expect": [
+   [
+    "104,000"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "P7",
+  "intent": "구간×소득",
+  "style": "이어지는 질문",
+  "persona": "활동지원_이용중",
+  "history": [
+   [
+    "user",
+    "본인부담금 9구간 중위소득 70% 이하는 얼마예요?"
+   ],
+   [
+    "assistant",
+    "9구간 중위소득 70% 이하는 165,900원입니다."
+   ]
+  ],
+  "question": "그럼 10구간은요?",
+  "expect": [
+   [
+    "145,100"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "P8",
+  "intent": "구간 시간",
+  "style": "정상+유형",
+  "persona": "활동지원_이용희망",
+  "history": [],
+  "question": "3구간은 몇 시간이에요?",
+  "expect": [
+   [
+    "420"
+   ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "P9",
+  "intent": "구간(소득 미지정)",
+  "style": "단문+유형",
+  "persona": "활동지원_이용중",
+  "history": [],
+  "question": "12구간 얼마예요?",
+  "expect": [
+   [
+    "103,700"
+   ],
+   [
+    "155,500"
+   ],
+   [
+    "207,200"
+   ],
+   [
+    "216,200"
+   ]
+  ],
+  "kind": "answer"
+ }
+]

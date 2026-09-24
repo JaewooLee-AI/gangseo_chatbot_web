@@ -11,6 +11,7 @@ import {
   extractContactAndSummary,
   extractHitlAnswer,
   FAILURE_TYPE_HUMAN_REQUESTED,
+  gapReason,
   FAILURE_TYPE_LOW_CONFIDENCE,
   FAILURE_TYPE_NO_MATCH,
   generateChatAnswer,
@@ -23,6 +24,8 @@ import {
   PERSONA_CATEGORIES,
   PERSONA_LABELS,
   STRICTNESS_THRESHOLD,
+  stripGapMarker,
+  userNamedSingleService,
   wantsHuman,
   type BotSettings,
   type ChatHistoryMessage,
@@ -262,8 +265,13 @@ export async function POST(req: Request) {
     // 페르소나를 선택하지 않은 채 "얼마예요?"처럼 짧고 일반적인 질문을 하면, 활동지원/
     // 가사 두 서비스 문서가 거의 같은 점수로 함께 검색되어 근거가 빈약한 쪽으로 우연히
     // 답이 나갈 수 있다(실측: 동일 질문인데 실행할 때마다 답변/폴백이 오감). 이 경우
-    // 추측하지 않고 어떤 서비스인지 먼저 되묻는다.
-    if (!personaCategories && detectAmbiguousService(matches)) {
+    // 추측하지 않고 어떤 서비스인지 먼저 되묻는다. 단, 사용자가 문장에서 분야를 직접 말했으면
+    // 묻지 않는다(userNamedSingleService 주석 참고).
+    if (
+      !personaCategories &&
+      !userNamedSingleService(prompt, history) &&
+      detectAmbiguousService(matches)
+    ) {
       return streamPlainText(
         applyTone(
           "어떤 서비스에 대해 궁금하신가요? \"장애인활동지원\" 또는 \"가사서비스\"라고 말씀해 주시면 더 정확하게 안내해 드릴게요.",
@@ -403,12 +411,15 @@ export async function POST(req: Request) {
         hasIntake: !!intakeRow,
         hasUnverified: topMatches.some((m) => m.verification === "고객확인필요"),
         handedOver,
+        originalQuestion: prompt,
       }
     );
 
     let response: string;
     let responseHandover: HandoverPrefill | undefined = intakeHandover;
     if (llmAnswer && isNoAnswerResponse(llmAnswer)) {
+      // LLM이 적은 "답하지 못한 내용"을 남겨, 근거 부족 판정이 맞았는지 로그로 확인할 수 있게 한다.
+      console.info("low_confidence:", { prompt, reason: gapReason(llmAnswer) ?? "(문구 감지)" });
       // Passed the similarity threshold but the LLM itself says it can't
       // answer from the retrieved context — flag for human review instead
       // of showing a confident-looking non-answer.
@@ -417,7 +428,7 @@ export async function POST(req: Request) {
         status: "pending",
         failure_type: FAILURE_TYPE_LOW_CONFIDENCE,
       });
-      response = `${llmAnswer}\n\n🚨 **[상담사 연결 권장]** 지식베이스에서 확실한 근거를 찾지 못해 관리자 검토 목록에 등록했습니다. 빠른 확인이 필요하시면 ${HANDOVER_HINT}`;
+      response = `${stripGapMarker(llmAnswer)}\n\n🚨 **[상담사 연결 권장]** 지식베이스에서 확실한 근거를 찾지 못해 관리자 검토 목록에 등록했습니다. 빠른 확인이 필요하시면 ${HANDOVER_HINT}`;
       responseHandover = intakeHandover ?? {};
     } else if (llmAnswer) {
       // 키워드 매칭 값은 트라이그램 유사도라 코사인 임계치와 스케일이 달라 나란히

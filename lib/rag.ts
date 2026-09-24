@@ -63,7 +63,19 @@ const MEDICAL_KEYWORDS = ["치매", "진단", "질병", "증상", "질환", "복
 const LEGAL_KEYWORDS = ["소송", "고소", "위자료", "손해배상", "법적", "계약서", "노무", "해고"];
 const PRIVACY_KEYWORDS = ["주민등록번호", "주민번호", "계좌번호", "카드번호", "비밀번호"];
 
+// LLM이 "사용자가 물은 것 중 참고 자료로 답하지 못한 것이 있다"고 스스로 판단했을 때 답변 끝에
+// 붙이도록 지시하는 마커 "[REF_GAP: 답하지 못한 내용]"(admin core/rag_engine.py와 동일).
+// 문구 매칭만으로는 표현이 조금만 달라도 놓친다(실측: "주차장 있어요?"에 "참고 자료에 나와
+// 있지 않아…"라고 정직하게 답했는데 목록에 "나와 있지 않"이 없어 정상 답변으로 처리됐고,
+// 접수 버튼도 HITL 기록도 남지 않았다 — 2026-09-24). 마커가 1순위, 문구는 보조 수단이다.
+
 const NO_ANSWER_PHRASES = [
+  "가지고 있지 않",
+  "안내해 드리지 못",
+  "정보가 없",
+  "나와 있지 않",
+  "기재되어 있지 않",
+  "포함되어 있지 않",
   "명시되어 있지 않",
   "정확한 답변을 드리기 어렵",
   "확인이 어렵",
@@ -249,8 +261,57 @@ export async function checkGuardrailBlock(
   return null;
 }
 
+// 마커는 "[REF_GAP: 답하지 못한 내용]" 형식이다. 무엇을 못 답했는지 적지 못한 마커(빈 마커)는
+// 근거 부족으로 보지 않는다: 막연히 붙인 마커가 실행마다 2~4건씩 정답에 붙어 "상담사 연결
+// 권장"이 나갔다(실측: "어디로 가요?", "차상위는?" 등 정답인데 마커 — 2026-09-24).
+const GAP_MARKER_PATTERN = /\[REF_GAP(?::\s*([^\]]*))?\]/g;
+
+export function gapReason(answer: string): string | null {
+  for (const m of answer.matchAll(GAP_MARKER_PATTERN)) {
+    const reason = (m[1] ?? "").trim();
+    if (reason) return reason;
+  }
+  return null;
+}
+
 export function isNoAnswerResponse(answer: string): boolean {
-  return NO_ANSWER_PHRASES.some((p) => answer.includes(p));
+  return gapReason(answer) !== null || NO_ANSWER_PHRASES.some((p) => answer.includes(p));
+}
+
+// 사용자에게 보여주기 전에 내부 신호용 마커를 지운다.
+export function stripGapMarker(answer: string): string {
+  return answer.replace(GAP_MARKER_PATTERN, "").trim();
+}
+
+// 사용자가 직접 쓴 문장에서 서비스 분야를 찾는다. 정규화된 질의는 쓰지 않는다: 정규화가
+// 사용자가 말하지 않은 서비스명을 추측해 넣는 경우가 있어("교육기관 알려주세요" →
+// "활동지원사 교육기관을 알려주세요."), 그 추측을 믿으면 되묻기의 목적(근거가 빈약한 쪽으로
+// 우연히 답하는 것 방지)이 무너진다.
+const SERVICE_MENTION_KEYWORDS: Record<"활동지원" | "가사", string[]> = {
+  활동지원: ["활동지원", "활동 지원", "활동보조", "활보", "장애인활동"],
+  가사: ["가사", "청소", "정리수납"],
+};
+
+export function mentionedServices(text: string): Set<"활동지원" | "가사"> {
+  const found = new Set<"활동지원" | "가사">();
+  for (const [group, keywords] of Object.entries(SERVICE_MENTION_KEYWORDS)) {
+    if (keywords.some((k) => text.includes(k))) found.add(group as "활동지원" | "가사");
+  }
+  return found;
+}
+
+// 이번 질문(없으면 가장 최근의 이전 질문들)에 서비스가 하나만 언급됐는지. 그렇다면
+// "어떤 서비스인가요?"라고 되묻지 않는다(실측: "활동지원사 교육긔관 어디에요"처럼 분야를
+// 직접 말했는데도 되물었다 — 2026-09-24). 이번 질문에 두 분야가 다 나오면 되묻기 판단을 그대로 둔다.
+export function userNamedSingleService(prompt: string, history: ChatHistoryMessage[]): boolean {
+  const now = mentionedServices(prompt);
+  if (now.size > 0) return now.size === 1;
+  const priorUserTurns = history.filter((m) => m.role === "user").slice(-3).reverse();
+  for (const m of priorUserTurns) {
+    const s = mentionedServices(m.content ?? "");
+    if (s.size > 0) return s.size === 1;
+  }
+  return false;
 }
 
 export function classifyInquiry(message: string): string {
@@ -482,10 +543,31 @@ export async function generateChatAnswer(
   tone: string,
   apiKey: string,
   modelName: string,
-  opts: { hasIntake?: boolean; hasUnverified?: boolean; handedOver?: boolean } = {}
+  opts: {
+    hasIntake?: boolean;
+    hasUnverified?: boolean;
+    handedOver?: boolean;
+    // 사용자가 실제로 쓴 문장. userQuery(정규화된 질의)와 다르면 함께 넘긴다.
+    originalQuestion?: string;
+  } = {}
 ): Promise<string | null> {
   const toneInstruction = TONE_INSTRUCTIONS[tone] ?? TONE_INSTRUCTIONS["친절한 상담원"];
   const contextText = contextChunks.join("\n---\n");
+
+  // 정규화는 짧은 질문을 풀어쓰면서 사용자가 묻지 않은 것을 덧붙이기도 한다
+  // (실측: "면접은?" → "면접 절차는 어떻게 되나요?"). 풀어쓴 질문만 주면 LLM이 지식에 없는
+  // "절차"를 이유로 근거 부족 마커를 붙여, 면접 일시를 정확히 답하고도 "상담사 연결 권장"이
+  // 나갔다 — 2026-09-24. 그래서 원문을 함께 주고, 답변 범위와 근거 판단은 원문 기준으로 한다.
+  const original = opts.originalQuestion?.trim();
+  const hasSeparateOriginal = !!original && original !== userQuery.trim();
+  const questionRule = hasSeparateOriginal
+    ? "답변 범위와 근거 부족 판단은 [사용자 질문(원문)] 기준으로 하세요. [풀어쓴 질문]은 줄임말이나\n" +
+      "이전 대화를 이해하기 위한 참고용이며, 풀어쓰면서 덧붙은 내용(예: 절차, 방법)은 답하지 못해도\n" +
+      "근거 부족으로 보지 마세요.\n"
+    : "";
+  const questionBlock = hasSeparateOriginal
+    ? `[사용자 질문(원문)]\n${original}\n\n[풀어쓴 질문]\n${userQuery}`
+    : `[사용자 질문]\n${userQuery}`;
   const buttonLabel = handoverButtonLabel(!!opts.handedOver);
 
   let extraRules = "";
@@ -513,14 +595,25 @@ export async function generateChatAnswer(
 아래 [참고 자료]에 있는 내용만 근거로 사용자 질문에 답변하세요.
 참고 자료에 없는 내용은 추측하지 말고 모른다고 답하세요.
 원문을 그대로 나열하지 말고, 사람이 읽기 편한 자연스러운 문장으로 정리해서 답변하세요.
+사용자에게 "참고 자료", "자료에 따르면" 같은 내부 표현을 쓰지 마세요.
+안내할 수 없는 내용이 있을 때만, 그것이 무엇인지 구체적으로 밝히세요.
+질문에 모두 답했다면 "안내하기 어렵다"는 식의 문장을 덧붙이지 마세요.
 ${extraRules}
+사용자가 직접 물은 내용 중 [참고 자료]로 답하지 못한 것이 있다면, 답변을 다 작성한 뒤 맨 마지막 줄에
+"[REF_GAP: 답하지 못한 내용]" 형식으로 무엇을 답하지 못했는지 짧게 적으세요(예: [REF_GAP: 주차 가능 여부]).
+답하지 못한 내용을 구체적으로 적을 수 없다면 마커를 붙이지 마세요.
+사용자가 물은 것에 모두 답했다면 붙이지 마세요. 인사말이나 장소·절차 같은 부가 안내를 덧붙였는지는
+판단과 상관없습니다. 접수 버튼으로 안내한 경우도 근거가 있는 답변이므로 붙이지 마세요.
+${questionRule}
 [참고 자료]
 ${contextText}
 
-[사용자 질문]
-${userQuery}`;
+${questionBlock}`;
 
-  return callGeminiGenerateContent(prompt, apiKey, modelName);
+  // temperature=0: 근거 부족 마커를 붙일지가 실행마다 흔들렸다(실측: 같은 "면접은?"이 한 번은
+  // 정상 답변, 한 번은 마커가 붙어 "상담사 연결 권장" — 2026-09-24). 상담 답변은 같은 질문에
+  // 같은 답을 하는 편이 낫다.
+  return callGeminiGenerateContent(prompt, apiKey, modelName, 0);
 }
 
 // Voice(STT) transcripts tend to be long and rambling (filler words, no
