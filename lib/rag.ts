@@ -22,12 +22,31 @@ const GEMINI_UPSTREAM_BASE =
   process.env.GEMINI_RELAY_URL ||
   "https://gemini-relay-645651316015.asia-northeast3.run.app";
 
-function geminiFetch(path: string, apiKey: string, body: unknown) {
-  return fetch(`${GEMINI_UPSTREAM_BASE}${path}`, {
-    method: "POST",
-    headers: { "x-relay-api-key": apiKey, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+// Gemini가 일시적으로 거절하는 경우(503 "high demand", 429 한도 초과, 5xx, 네트워크 오류·시간 초과)는
+// 잠시 쉬었다가 한 번 더 시도한다. 재시도 없이 실패하면 LLM 답변 대신 원문 자료가 그대로 나가거나
+// 정규화·가드레일이 건너뛰어진다(실측: 운영에서 1분 사이 503이 3번 — 2026-09-24).
+// 호출마다 시간 제한을 둬서 응답이 멈췄을 때 무한정 기다리지 않게 한다.
+const GEMINI_TIMEOUT_MS = 15_000;
+const GEMINI_RETRY_DELAY_MS = 800;
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+
+async function geminiFetch(path: string, apiKey: string, body: unknown): Promise<Response> {
+  const attempt = () =>
+    fetch(`${GEMINI_UPSTREAM_BASE}${path}`, {
+      method: "POST",
+      headers: { "x-relay-api-key": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+    });
+  try {
+    const res = await attempt();
+    if (!RETRYABLE_STATUS.has(res.status)) return res;
+    console.warn(`Gemini ${res.status} on ${path}, retrying once`);
+  } catch (err) {
+    console.warn(`Gemini request error on ${path}, retrying once:`, err);
+  }
+  await new Promise((r) => setTimeout(r, GEMINI_RETRY_DELAY_MS));
+  return attempt();
 }
 
 // get_llm_api_key RPC(Supabase Vault 조회) 호출 실패를 조용히 삼키지 않고
