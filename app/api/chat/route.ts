@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
   applyTone,
+  bothServicesPlausible,
   buildIntakePrefill,
   checkGuardrailBlock,
   COMMON_CATEGORY,
@@ -18,7 +19,9 @@ import {
   generateEmbedding,
   getGeminiApiKey,
   HITL_CACHE_THRESHOLD,
+  isMeaninglessInput,
   isNoAnswerResponse,
+  isSmallTalk,
   normalizeQuery,
   parseEmbedding,
   PERSONA_CATEGORIES,
@@ -172,6 +175,19 @@ export async function POST(req: Request) {
       return streamPlainText("문의 내용을 입력해 주세요.");
     }
 
+    // 의미 없는 입력·챗봇 소개 요청은 지식 검색 대상이 아니다. LLM을 부르지 않고 바로 답하며,
+    // 지식 공백이 아니므로 fallback_logs(HITL 목록)에도 남기지 않는다.
+    if (isMeaninglessInput(prompt)) {
+      return streamPlainText(
+        "말씀하신 내용을 이해하지 못했어요. 궁금하신 점을 조금 더 자세히 적어 주세요.\n(예: \"가사서비스 요금은 얼마예요?\", \"활동지원사 면접은 언제예요?\")"
+      );
+    }
+    if (isSmallTalk(prompt)) {
+      return streamPlainText(
+        "안녕하세요. 저는 강서나눔돌봄센터 AI 상담 챗봇입니다.\n장애인활동지원·가사서비스 이용 안내와 활동지원사·가사관리사 채용 안내 등을 도와드려요. 궁금하신 내용을 편하게 물어보세요."
+      );
+    }
+
     // 1. 담당자 연결 의도 — 접수는 "담당자에게 메시지 남기기" 모달로만 받는다.
     // 예전에는 여기서 연락처가 보이면 바로 counselor_inquiries에 적재했는데, 그 경로는
     // 성함을 받지 않았고 저장 실패를 확인하지 않아 실패해도 "접수 완료"라고 안내했다.
@@ -314,6 +330,23 @@ export async function POST(req: Request) {
     // 임계치를 넘는 문서가 하나도 없어도, pg_trgm 키워드 검색이 정확 매칭 문서를
     // 찾아왔다면 그것만으로도 답변을 시도한다.
     const vectorGatePassed = matches.length > 0 && matches[0].sim >= threshold;
+
+    // 서비스를 말하지 않은 짧은 질문이 기준을 못 넘었는데 두 서비스 모두에 그럴듯한 문서가 있으면,
+    // "답 없음"으로 끝내지 말고 어떤 서비스인지 되묻는다(bothServicesPlausible 주석 참고).
+    if (
+      !vectorGatePassed &&
+      keywordMatches.length === 0 &&
+      !personaCategories &&
+      !userNamedSingleService(prompt, history) &&
+      bothServicesPlausible(matches)
+    ) {
+      return streamPlainText(
+        applyTone(
+          "어떤 서비스에 대해 궁금하신가요? \"장애인활동지원\" 또는 \"가사서비스\"라고 말씀해 주시면 더 정확하게 안내해 드릴게요.",
+          settings.tone
+        )
+      );
+    }
 
     if (!vectorGatePassed && keywordMatches.length === 0) {
       // 임계치 이상 문서도, 키워드 매칭 문서도 하나도 없는, 가장 흔한 지식 공백 케이스.

@@ -21,6 +21,9 @@ node tests/regression/run.mjs <url> P E               # id가 P, E로 시작하�
 | `expect` | 정답 판정. 바깥 배열은 AND, 안쪽 배열은 OR (예: `[["화요일"],["14시","2시"]]`) |
 | `kind` | `answer` 정답 답변 / `handover` 접수 버튼 신호 / `fallback` 지식 없음으로 처리(전화번호 지어내기 금지) / `not_blocked` 가드레일 오차단 없음 / `answer_or_clarify` 되묻기 또는 정답 |
 | `allowGap` | 지식에 일부만 있는 질문. 아는 부분을 답하면서 "근거 부족"으로 표시해도 정답 |
+| `expectNot` | 답변에 나오면 안 되는 말(예: 가사 질문에 활동지원 면접 요일) |
+
+`kind`에는 `meaningless`(의미 없는 입력 안내)와 `small_talk`(챗봇 소개)도 있다.
 
 정답 값은 `gangseo_chatbot_admin/Refined_Chatbot_Data_v4.1.xlsx`(현재 운영 지식)에서 가져왔다.
 지식 엑셀이 바뀌면(요금 인상, 본인부담금 연도 변경 등) `expect`도 함께 고쳐야 한다.

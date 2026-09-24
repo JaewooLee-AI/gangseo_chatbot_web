@@ -954,7 +954,7 @@
     "129"
    ]
   ],
-  "kind": "answer",
+  "kind": "answer_or_clarify",
   "allowGap": true
  },
  {
@@ -1108,6 +1108,91 @@
    [
     "216,200"
    ]
+  ],
+  "kind": "answer"
+ },
+ {
+  "id": "S1",
+  "intent": "의미 없는 입력",
+  "style": "자모만",
+  "persona": null,
+  "history": [],
+  "question": "ㄴㄴㄴㄴ",
+  "expect": [],
+  "kind": "meaningless"
+ },
+ {
+  "id": "S2",
+  "intent": "챗봇 소개",
+  "style": "잡담",
+  "persona": null,
+  "history": [],
+  "question": "당신 누구",
+  "expect": [],
+  "kind": "small_talk"
+ },
+ {
+  "id": "C1",
+  "intent": "공통 정보(되묻기 금지)",
+  "style": "정상",
+  "persona": null,
+  "history": [],
+  "question": "우장산로 센터 1층으로 면접 보러 갈 때 차를 가져가도 되나요? 주차 공간이 있나요?",
+  "expect": [],
+  "kind": "fallback"
+ },
+ {
+  "id": "C2",
+  "intent": "서비스 미지정 단문",
+  "style": "단문",
+  "persona": null,
+  "history": [],
+  "question": "얼마예요",
+  "expect": [
+   [
+    "75,000"
+   ],
+   [
+    "216,200",
+    "20,000"
+   ]
+  ],
+  "kind": "answer_or_clarify"
+ },
+ {
+  "id": "C3",
+  "intent": "서비스 미지정 채용",
+  "style": "단문",
+  "persona": null,
+  "history": [],
+  "question": "채용하세요?",
+  "expect": [
+   [
+    "활동지원사"
+   ],
+   [
+    "가사관리사"
+   ]
+  ],
+  "kind": "answer_or_clarify"
+ },
+ {
+  "id": "C4",
+  "intent": "가사 면접(활동지원 섞임 금지)",
+  "style": "단문",
+  "persona": null,
+  "history": [],
+  "question": "가사지원 면접",
+  "expect": [
+   [
+    "이름",
+    "전화번호",
+    "연락처",
+    "담당자"
+   ]
+  ],
+  "expectNot": [
+   "화요일"
   ],
   "kind": "answer"
  }

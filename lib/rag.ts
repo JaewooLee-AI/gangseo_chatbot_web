@@ -168,6 +168,10 @@ export function detectAmbiguousService(
   minPlausible = CONTEXT_THRESHOLD,
   maxGap = 0.05
 ): boolean {
+  // 가장 잘 맞는 문서가 공통 정보(센터 주소 등)면 서비스와 무관한 질문이므로 되묻지 않는다
+  // (실측: "면접 갈 때 주차 공간 있나요?"에 "장애인활동지원인가요, 가사서비스인가요?"라고 되물었다 —
+  // 1위는 0_공통이었고 2~3위의 서비스가 갈렸을 뿐이다, 2026-09-24).
+  if (matches[0] && matches[0].category === COMMON_CATEGORY) return false;
   const bestByGroup: Record<string, number> = {};
   for (const m of matches.slice(0, topN)) {
     const group = inferServiceGroup(m.category);
@@ -179,6 +183,22 @@ export function detectAmbiguousService(
   const scores = Object.values(bestByGroup).sort((a, b) => b - a);
   if (scores.length < 2) return false;
   return scores[0] >= minPlausible && scores[0] - scores[1] <= maxGap;
+}
+
+// 기준(게이트)을 넘는 문서는 없지만 두 서비스 모두에 그럴듯한 문서가 있는지. 사용자가 서비스를
+// 말하지 않은 짧은 질문("채용하세요?")은 정규화가 서비스를 추측해 넣지 않게 한 뒤로 점수가 낮게
+// 나오는데, 이때 "답을 찾지 못했습니다"보다 어떤 서비스인지 되묻는 편이 맞다(2026-09-24).
+export function bothServicesPlausible(
+  matches: Array<{ sim: number; category: string }>,
+  topN = 10,
+  minPlausible = CONTEXT_THRESHOLD
+): boolean {
+  const groups = new Set<string>();
+  for (const m of matches.slice(0, topN)) {
+    const g = inferServiceGroup(m.category);
+    if (g && m.sim >= minPlausible) groups.add(g);
+  }
+  return groups.size === 2;
 }
 
 // fallback_logs.failure_type 값: 오답 리뷰(admin 대시보드 Module 02)에서 실패 원인별
@@ -281,6 +301,26 @@ export function isNoAnswerResponse(answer: string): boolean {
 // 사용자에게 보여주기 전에 내부 신호용 마커를 지운다.
 export function stripGapMarker(answer: string): string {
   return answer.replace(GAP_MARKER_PATTERN, "").trim();
+}
+
+// 한글 음절·영문·숫자가 하나도 없는 입력("ㄴㄴㄴㄴ", "??")은 검색·LLM 호출 없이 다시 물어본다.
+// 예전에는 정규화가 "죄송합니다, 의도를 파악하기 어렵습니다…"라는 답을 써 버리고, 그 문장으로
+// 검색해 엉뚱한 "어떤 서비스인가요?"가 나갔으며 HITL 목록에도 쌓였다(2026-09-24).
+export function isMeaninglessInput(text: string): boolean {
+  return !/[가-힣A-Za-z0-9]/.test(text);
+}
+
+// 챗봇 자신에 대한 짧은 질문·인사. 지식 검색 대상이 아니므로 고정 소개로 답한다.
+// 오인을 막기 위해 짧은 문장 전체가 이 형태일 때만 해당한다("담당자가 누구세요?"는 제외).
+const SMALL_TALK_PATTERNS = [
+  /^(너|넌|당신|니|거기)\s*(는|은)?\s*(누구|뭐|정체)/,
+  /^누구(세요|야|니|신가요|십니까)/,
+  /^(너|넌|당신)?\s*(챗봇|로봇|사람|AI|ai|인공지능)\s*(이야|이에요|인가요|이니|입니까|맞아|맞나요)/,
+  /^(안녕|안녕하세요|안녕하십니까|하이|hi|hello)$/i,
+];
+export function isSmallTalk(text: string): boolean {
+  const t = text.trim().replace(/[\s!?.~…]+$/g, "");
+  return t.length <= 15 && SMALL_TALK_PATTERNS.some((p) => p.test(t));
 }
 
 // 사용자가 직접 쓴 문장에서 서비스 분야를 찾는다. 정규화된 질의는 쓰지 않는다: 정규화가
@@ -494,13 +534,20 @@ export async function normalizeQuery(
    3구간은 얼마예요?"로 바꾸면 안 됩니다 — 원문에 없던 "장기요양급여"라는 제도명을
    임의로 추가한 것입니다). 대화에서 이미 언급된 서비스명과 [사용자가 선택한 문의 유형]은
    사용자가 직접 알려준 정보이므로 반영해도 되지만, 그 외 근거 없는 새 정보는 추가하지 마세요.
+   특히 사용자가 말하지 않았고 유형도 "(선택 안 함)"이라면 서비스 분야(장애인활동지원 / 가사서비스)나
+   직종(활동지원사 / 가사관리사)을 추측해서 넣지 마세요.
+   (나쁜 예: 유형 선택 없이 "교육기관 알려주세요" → "활동지원사 교육기관을 알려주세요.")
+   (옳은 예: 같은 상황에서 "교육기관을 알려주세요.")
 5. 질문에 분야(장애인활동지원 / 가사서비스)가 이미 드러나 있으면, 선택한 유형은 완전히
    무시하고 질문에 쓰인 분야만 남기세요. 두 분야를 한 문장에 절대 합치지 마세요.
    (나쁜 예: 유형이 "장애인활동지원 · 활동지원사로 일하고 싶어요"인 사용자의 "가사서비스
     비용은?"을 "장애인활동지원 서비스의 가사서비스 이용 비용은 얼마인가요?"로 바꾸는 것.
     실제로 존재하지 않는 조합이라 답을 찾지 못합니다.)
    (옳은 예: 같은 상황에서 "가사서비스 이용 비용은 얼마인가요?")
-6. 다른 설명 없이, 교정된 질문 문장 하나만 출력하세요.
+   "가사지원", "가사도우미", "청소"는 가사서비스 쪽 표현이므로 여기에 "활동지원사"를 붙이지 마세요.
+6. 질문으로 다듬을 수 없는 입력(의미 없는 글자 등)이면 원문을 그대로 출력하세요.
+   사용자에게 답하거나 되묻는 문장을 쓰지 마세요.
+7. 다른 설명 없이, 교정된 질문 문장 하나만 출력하세요.
 
 [사용자가 선택한 문의 유형]
 ${personaText}

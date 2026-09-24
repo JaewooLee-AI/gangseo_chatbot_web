@@ -25,6 +25,8 @@ const cases = JSON.parse(readFileSync(join(here, "cases.json"), "utf8")).filter(
 // 응답 문구로 어느 경로를 탔는지 분류한다(app/api/chat/route.ts의 고정 문구 기준).
 function route(text) {
   if (text.startsWith("ERROR")) return "오류";
+  if (text.includes("말씀하신 내용을 이해하지 못했어요")) return "무의미안내";
+  if (text.includes("저는 강서나눔돌봄센터 AI 상담 챗봇입니다")) return "챗봇소개";
   if (text.includes("[Fallback 발동]")) return "가드레일차단";
   if (text.includes("어떤 서비스에 대해 궁금")) return "되묻기";
   if (text.includes("엄격도 설정 기준")) return "답없음";
@@ -36,12 +38,13 @@ function route(text) {
 }
 
 const hasAll = (text, expect) => expect.every((group) => group.some((k) => text.includes(k)));
+const hasNone = (text, words = []) => words.every((w) => !text.includes(w));
 
 function grade(c, r) {
   const rt = route(r.text);
   switch (c.kind) {
     case "answer":
-      return (rt === "답변" || (c.allowGap && rt === "근거부족")) && hasAll(r.text, c.expect);
+      return (rt === "답변" || (c.allowGap && rt === "근거부족")) && hasAll(r.text, c.expect) && hasNone(r.text, c.expectNot);
     case "answer_or_clarify":
       return rt === "되묻기" || (rt === "답변" && hasAll(r.text, c.expect));
     case "handover":
@@ -51,6 +54,10 @@ function grade(c, r) {
       const phones = r.text.match(/0\d{1,2}-\d{3,4}-\d{4}/g) || [];
       return (rt === "답없음" || rt === "근거부족") && phones.length === 0;
     }
+    case "meaningless":
+      return rt === "무의미안내";
+    case "small_talk":
+      return rt === "챗봇소개";
     case "not_blocked":
       return rt !== "가드레일차단" && rt !== "오류" && rt !== "엔진오류";
     default:
